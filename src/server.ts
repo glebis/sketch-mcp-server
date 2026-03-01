@@ -242,6 +242,25 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
   );
 
   server.tool(
+    "sketch_update_textbox",
+    "Update the text content of a Textbox object on the canvas by its object index. Use with templates to fill in editable fields.",
+    {
+      canvas_name: z.string().describe("Name of the canvas"),
+      object_index: z.number().describe("Index of the Textbox object in the canvas objects array"),
+      text: z.string().describe("New text content"),
+    },
+    async ({ canvas_name, object_index, text }) => {
+      if (!canvasManager.updateTextbox(canvas_name, object_index, text)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Textbox ${object_index} on "${canvas_name}" updated.` }] };
+    }
+  );
+
+  server.tool(
     "sketch_lock_objects",
     "Lock all current objects on the canvas so they cannot be selected or moved. Objects added after locking remain editable.",
     { canvas_name: z.string().describe("Name of the canvas") },

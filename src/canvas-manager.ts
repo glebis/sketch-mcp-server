@@ -378,6 +378,13 @@ export class CanvasManager {
     }));
   }
 
+  updateTextbox(name: string, objectIndex: number, text: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    this.broadcast(session, { type: "update_textbox", object_index: objectIndex, text });
+    return true;
+  }
+
   clearCanvas(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
