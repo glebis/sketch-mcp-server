@@ -1,4 +1,4 @@
-import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, PencilBrush, IText, Textbox, FabricText, FabricObject, FabricImage, loadSVGFromString } from "fabric";
+import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, PencilBrush, IText, Textbox, FabricText, FabricObject, FabricImage, Point, loadSVGFromString } from "fabric";
 import type { ToolType } from "./toolbar.ts";
 import { initToolbar } from "./toolbar.ts";
 import { initClipboardHandler } from "./clipboard.ts";
@@ -44,6 +44,157 @@ window.addEventListener("resize", () => {
     width: container.clientWidth,
     height: container.clientHeight,
   });
+  canvas.requestRenderAll();
+});
+
+// --- Zoom & Pan ---
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 10;
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+
+// Zoom indicator
+const zoomIndicator = document.createElement("div");
+zoomIndicator.className = "zoom-indicator";
+zoomIndicator.textContent = "100%";
+document.body.appendChild(zoomIndicator);
+
+function updateZoomIndicator() {
+  const pct = Math.round(canvas.getZoom() * 100);
+  zoomIndicator.textContent = `${pct}%`;
+}
+
+function clampZoom(z: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+// Scroll wheel zoom (also handles trackpad pinch via ctrlKey)
+canvas.on("mouse:wheel", (opt) => {
+  const e = opt.e as WheelEvent;
+  e.preventDefault();
+  e.stopPropagation();
+
+  const delta = e.deltaY;
+  let zoom = canvas.getZoom();
+  zoom *= 0.999 ** delta;
+  zoom = clampZoom(zoom);
+
+  const point = canvas.getScenePoint(e);
+  canvas.zoomToPoint(point, zoom);
+  updateZoomIndicator();
+});
+
+// Middle-click drag pan
+canvas.on("mouse:down", (opt) => {
+  const e = opt.e as MouseEvent;
+  if (e.button === 1) {
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY };
+    canvas.defaultCursor = "grabbing";
+    canvas.selection = false;
+    e.preventDefault();
+  }
+});
+
+canvas.on("mouse:move", (opt) => {
+  if (!isPanning) return;
+  const e = opt.e as MouseEvent;
+  const dx = e.clientX - panStart.x;
+  const dy = e.clientY - panStart.y;
+  canvas.relativePan(new Point(dx, dy));
+  panStart = { x: e.clientX, y: e.clientY };
+});
+
+canvas.on("mouse:up", (opt) => {
+  if (isPanning) {
+    isPanning = false;
+    applyToolMode(); // restore cursor + selection
+  }
+});
+
+// Zoom to fit all content
+function zoomToFit() {
+  const objects = canvas.getObjects();
+  if (objects.length === 0) {
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    updateZoomIndicator();
+    return;
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const obj of objects) {
+    const bound = obj.getBoundingRect();
+    minX = Math.min(minX, bound.left);
+    minY = Math.min(minY, bound.top);
+    maxX = Math.max(maxX, bound.left + bound.width);
+    maxY = Math.max(maxY, bound.top + bound.height);
+  }
+
+  const padding = 40;
+  const contentW = maxX - minX;
+  const contentH = maxY - minY;
+  if (contentW <= 0 || contentH <= 0) return;
+
+  const canvasW = canvas.getWidth();
+  const canvasH = canvas.getHeight();
+  let scale = Math.min(
+    (canvasW - padding * 2) / contentW,
+    (canvasH - padding * 2) / contentH,
+  );
+  scale = Math.min(scale, 1); // don't zoom in past 100%
+
+  canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // reset first
+  canvas.setZoom(scale);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  canvas.absolutePan(new Point(
+    centerX * scale - canvasW / 2,
+    centerY * scale - canvasH / 2,
+  ));
+  updateZoomIndicator();
+}
+
+// Keyboard shortcuts for zoom
+document.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return;
+
+  // Prevent if typing in input/textarea
+  const tag = (e.target as HTMLElement).tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  const active = canvas.getActiveObject();
+  if (active instanceof IText && active.isEditing) return;
+
+  switch (e.key) {
+    case "0": // Reset to 100%, reset pan
+      e.preventDefault();
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      updateZoomIndicator();
+      break;
+    case "1": // Zoom to fit
+      e.preventDefault();
+      zoomToFit();
+      break;
+    case "=":
+    case "+": // Zoom in
+      e.preventDefault();
+      {
+        const z = clampZoom(canvas.getZoom() * 1.25);
+        const center = new Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+        canvas.zoomToPoint(center, z);
+        updateZoomIndicator();
+      }
+      break;
+    case "-": // Zoom out
+      e.preventDefault();
+      {
+        const z = clampZoom(canvas.getZoom() / 1.25);
+        const center = new Point(canvas.getWidth() / 2, canvas.getHeight() / 2);
+        canvas.zoomToPoint(center, z);
+        updateZoomIndicator();
+      }
+      break;
+  }
 });
 
 // --- Toolbar ---
@@ -624,6 +775,24 @@ function connectWebSocket() {
         }
         case "load_json":
           loadCanvasJson(msg.json);
+          break;
+        case "set_zoom": {
+          const zoom = clampZoom(msg.value);
+          if (msg.cx !== undefined && msg.cy !== undefined) {
+            canvas.zoomToPoint(new Point(msg.cx, msg.cy), zoom);
+          } else {
+            canvas.setZoom(zoom);
+          }
+          canvas.requestRenderAll();
+          updateZoomIndicator();
+          break;
+        }
+        case "pan_to":
+          canvas.absolutePan(new Point(msg.x, msg.y));
+          canvas.requestRenderAll();
+          break;
+        case "zoom_to_fit":
+          zoomToFit();
           break;
         case "ping":
           ws!.send(JSON.stringify({ type: "pong" }));

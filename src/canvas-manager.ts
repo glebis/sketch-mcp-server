@@ -265,6 +265,35 @@ export class CanvasManager {
     return true;
   }
 
+  // --- Zoom & Pan ---
+
+  setZoom(name: string, value: number, cx?: number, cy?: number): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "set_zoom", value, cx, cy });
+    }
+    return true;
+  }
+
+  panTo(name: string, x: number, y: number): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "pan_to", x, y });
+    }
+    return true;
+  }
+
+  zoomToFit(name: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "zoom_to_fit" });
+    }
+    return true;
+  }
+
   // --- Canvas JSON (for templates) ---
 
   requestCanvasJson(session: CanvasSession): Promise<string> {

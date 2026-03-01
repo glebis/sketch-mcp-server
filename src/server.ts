@@ -253,6 +253,62 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
   );
 
   server.tool(
+    "sketch_set_zoom",
+    "Set the zoom level of a canvas. 1.0 = 100%. Optionally specify a center point to zoom toward.",
+    {
+      canvas_name: z.string().describe("Name of the canvas"),
+      zoom: z.number().describe("Zoom level (1.0 = 100%, 0.5 = 50%, 2.0 = 200%)"),
+      center_x: z.number().optional().describe("X coordinate to zoom toward"),
+      center_y: z.number().optional().describe("Y coordinate to zoom toward"),
+    },
+    async ({ canvas_name, zoom, center_x, center_y }) => {
+      if (!canvasManager.setZoom(canvas_name, zoom, center_x ?? undefined, center_y ?? undefined)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Zoom set to ${Math.round(zoom * 100)}% on "${canvas_name}".` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_pan_to",
+    "Pan the canvas so that the given coordinates are at the top-left of the viewport.",
+    {
+      canvas_name: z.string().describe("Name of the canvas"),
+      x: z.number().describe("X coordinate for top-left of viewport"),
+      y: z.number().describe("Y coordinate for top-left of viewport"),
+    },
+    async ({ canvas_name, x, y }) => {
+      if (!canvasManager.panTo(canvas_name, x, y)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Panned "${canvas_name}" to (${x}, ${y}).` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_zoom_to_fit",
+    "Fit all canvas content in view with padding. Most useful after drawing to ensure everything is visible regardless of browser window size.",
+    {
+      canvas_name: z.string().describe("Name of the canvas"),
+    },
+    async ({ canvas_name }) => {
+      if (!canvasManager.zoomToFit(canvas_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Zoomed to fit content on "${canvas_name}".` }] };
+    }
+  );
+
+  server.tool(
     "sketch_save_template",
     "Save the current canvas state as a reusable JSON template. Preserves Textbox widths, lock states, and all object properties.",
     {

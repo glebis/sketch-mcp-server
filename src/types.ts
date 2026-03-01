@@ -20,7 +20,10 @@ export type ServerMessage =
   | { type: "unlock_all" }
   | { type: "request_json"; request_id: string }
   | { type: "request_screenshot"; request_id: string }
-  | { type: "load_json"; json: string };
+  | { type: "load_json"; json: string }
+  | { type: "set_zoom"; value: number; cx?: number; cy?: number }
+  | { type: "pan_to"; x: number; y: number }
+  | { type: "zoom_to_fit" };
 
 export interface TextboxOptions {
   x: number;

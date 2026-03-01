@@ -29,6 +29,9 @@ npm start        # node dist/index.js --stdio
 - `sketch_load_template` - load JSON template into canvas
 - `sketch_list_templates` - list saved templates
 - `sketch_list_canvases` - list active sessions
+- `sketch_set_zoom` - set zoom level (1.0 = 100%), optionally toward a point
+- `sketch_pan_to` - pan so (x,y) is at viewport top-left
+- `sketch_zoom_to_fit` - fit all content in view with padding
 - `sketch_capture_screenshot` - capture PNG screenshot of canvas (returns image)
 - `sketch_clear_canvas` - clear canvas to blank
 - `sketch_focus_canvas` - bring canvas window to front

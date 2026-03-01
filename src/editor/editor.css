@@ -136,3 +136,14 @@ html, body {
   color: #868e96;
   pointer-events: none;
 }
+
+/* Zoom indicator */
+.zoom-indicator {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  font-size: 11px;
+  color: #868e96;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
