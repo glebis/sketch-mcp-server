@@ -1,10 +1,13 @@
-import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, PencilBrush, IText, FabricObject, FabricImage, loadSVGFromString } from "fabric";
+import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, PencilBrush, IText, Textbox, FabricText, FabricObject, FabricImage, loadSVGFromString } from "fabric";
 import type { ToolType } from "./toolbar.ts";
 import { initToolbar } from "./toolbar.ts";
 import { initClipboardHandler } from "./clipboard.ts";
 
 // Expose FabricImage for clipboard handler
 (window as any).__fabric = { FabricImage };
+
+// Register 'locked' so it survives JSON serialization
+FabricObject.customProperties = [...(FabricObject.customProperties || []), "locked"];
 
 // --- State ---
 const canvasName = decodeURIComponent(window.location.pathname.split("/").pop() || "default");
@@ -32,6 +35,7 @@ const canvas = new FabricCanvas(canvasEl, {
   height: container.clientHeight,
   backgroundColor: "#ffffff",
   selection: true,
+  preserveObjectStacking: true,
 });
 
 // Resize handling
@@ -99,19 +103,23 @@ canvas.on("mouse:down", (opt) => {
 
   if (currentTool === "text") {
     const pointer = canvas.getScenePoint(opt.e);
-    const text = new IText("Text", {
+    isDrawingShape = true;
+    shapeOrigin = { x: pointer.x, y: pointer.y };
+
+    // Dashed preview rectangle while dragging
+    activeShape = new Rect({
       left: pointer.x,
       top: pointer.y,
-      fontSize: 20,
-      fill: toolbarState.fillColor,
-      fontFamily: "sans-serif",
+      width: 0,
+      height: 0,
+      fill: "transparent",
+      stroke: "#4dabf7",
+      strokeWidth: 1,
+      strokeDashArray: [4, 4],
+      selectable: false,
+      evented: false,
     });
-    canvas.add(text);
-    canvas.setActiveObject(text);
-    text.enterEditing();
-    saveState();
-    currentTool = "select";
-    applyToolMode();
+    canvas.add(activeShape);
     return;
   }
 
@@ -140,6 +148,7 @@ canvas.on("mouse:down", (opt) => {
       activeShape = new Triangle({ ...commonProps, width: 0, height: 0 });
       break;
     case "line":
+    case "arrow":
       activeShape = new Line([pointer.x, pointer.y, pointer.x, pointer.y], {
         stroke: toolbarState.strokeColor,
         strokeWidth: toolbarState.strokeWidth,
@@ -185,9 +194,83 @@ canvas.on("mouse:move", (opt) => {
 canvas.on("mouse:up", () => {
   if (!isDrawingShape || !activeShape) return;
 
-  activeShape.set({ selectable: true, evented: true });
-  activeShape.setCoords();
-  canvas.setActiveObject(activeShape);
+  // Text tool: convert preview rect into IText or Textbox
+  if (currentTool === "text") {
+    const w = (activeShape as Rect).width || 0;
+    const h = (activeShape as Rect).height || 0;
+    const left = activeShape.left!;
+    const top = activeShape.top!;
+    canvas.remove(activeShape);
+
+    let textObj: IText | Textbox;
+    if (w < 10 && h < 10) {
+      // Simple click -- free-width IText
+      textObj = new IText("Text", {
+        left: shapeOrigin.x,
+        top: shapeOrigin.y,
+        fontSize: 20,
+        fill: toolbarState.fillColor,
+        fontFamily: "sans-serif",
+      });
+    } else {
+      // Dragged -- fixed-width Textbox with word wrap
+      textObj = new Textbox("Text", {
+        left,
+        top,
+        width: w,
+        fontSize: 20,
+        fill: toolbarState.fillColor,
+        fontFamily: "sans-serif",
+      });
+    }
+
+    canvas.add(textObj);
+    canvas.setActiveObject(textObj);
+    textObj.enterEditing();
+    textObj.selectAll();
+
+    isDrawingShape = false;
+    activeShape = null;
+    saveState();
+    currentTool = "select";
+    applyToolMode();
+    return;
+  }
+
+  if (currentTool === "arrow" && activeShape instanceof Line) {
+    const x1 = activeShape.x1!, y1 = activeShape.y1!;
+    const x2 = activeShape.x2!, y2 = activeShape.y2!;
+    canvas.remove(activeShape);
+
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const headLen = Math.max(12, toolbarState.strokeWidth * 4);
+    const headPoints = [
+      { x: x2, y: y2 },
+      { x: x2 - headLen * Math.cos(angle - Math.PI / 6), y: y2 - headLen * Math.sin(angle - Math.PI / 6) },
+      { x: x2 - headLen * Math.cos(angle + Math.PI / 6), y: y2 - headLen * Math.sin(angle + Math.PI / 6) },
+    ];
+
+    const line = new Line([x1, y1, x2, y2], {
+      stroke: toolbarState.strokeColor,
+      strokeWidth: toolbarState.strokeWidth,
+    });
+    const head = new Polygon(headPoints, {
+      fill: toolbarState.strokeColor,
+      stroke: toolbarState.strokeColor,
+      strokeWidth: 1,
+    });
+
+    const arrow = new Group([line, head], {
+      selectable: true,
+      evented: true,
+    });
+    canvas.add(arrow);
+    canvas.setActiveObject(arrow);
+  } else {
+    activeShape.set({ selectable: true, evented: true });
+    activeShape.setCoords();
+    canvas.setActiveObject(activeShape);
+  }
 
   isDrawingShape = false;
   activeShape = null;
@@ -197,6 +280,27 @@ canvas.on("mouse:up", () => {
 // --- Object Modification ---
 canvas.on("object:modified", () => saveState());
 canvas.on("path:created", () => saveState());
+
+// --- Delete selected objects ---
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Delete" && e.key !== "Backspace") return;
+  const tag = (e.target as HTMLElement).tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  // Don't delete while editing text on canvas
+  const active = canvas.getActiveObject();
+  if (active instanceof IText && active.isEditing) return;
+
+  const objects = canvas.getActiveObjects();
+  if (objects.length === 0) return;
+
+  e.preventDefault();
+  canvas.discardActiveObject();
+  for (const obj of objects) {
+    canvas.remove(obj);
+  }
+  canvas.requestRenderAll();
+  saveState();
+});
 
 // --- Undo/Redo ---
 function saveState() {
@@ -226,6 +330,7 @@ function redo() {
 async function restoreState(json: string) {
   skipSave = true;
   await canvas.loadFromJSON(json);
+  reapplyLockState();
   canvas.requestRenderAll();
   skipSave = false;
   scheduleAutoSave();
@@ -248,6 +353,74 @@ function sendCanvasUpdate() {
   ws.send(JSON.stringify({ type: "canvas_update", svg }));
 }
 
+// Convert FabricText to IText so double-click editing works
+function toEditable(obj: FabricObject): FabricObject {
+  if (obj instanceof FabricText && !(obj instanceof IText)) {
+    const { text, ...props } = obj.toObject();
+    const itext = new IText(text, props);
+    itext.set({ left: obj.left, top: obj.top });
+    return itext;
+  }
+  return obj;
+}
+
+// --- Manual SVG text extraction ---
+// Fabric.js v6 loadSVGFromString often returns null for <text> elements.
+// We extract them from the DOM and create IText objects directly.
+function extractTextElements(svgString: string): { strippedSvg: string; textObjects: IText[] } {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, "image/svg+xml");
+  const svgEl = doc.querySelector("svg");
+  if (!svgEl) return { strippedSvg: svgString, textObjects: [] };
+
+  const textEls = Array.from(svgEl.querySelectorAll("text"));
+  const textObjects: IText[] = [];
+
+  for (const t of textEls) {
+    const x = parseFloat(t.getAttribute("x") || "0");
+    const y = parseFloat(t.getAttribute("y") || "0");
+    const fontSize = parseFloat(t.getAttribute("font-size") || "16");
+    const fill = t.getAttribute("fill") || "#000000";
+    const fontFamily = t.getAttribute("font-family") || "sans-serif";
+    const fontWeight = t.getAttribute("font-weight") || "normal";
+    const textContent = t.textContent || "";
+    const textAnchor = t.getAttribute("text-anchor");
+    const letterSpacing = t.getAttribute("letter-spacing");
+
+    // SVG y = baseline; Fabric top = bounding box top. Offset ~80% of fontSize.
+    let left = x;
+    const top = y - fontSize * 0.82;
+
+    const itext = new IText(textContent, {
+      left,
+      top,
+      fontSize,
+      fill,
+      fontFamily,
+      fontWeight: fontWeight === "bold" ? "bold" : "normal",
+    });
+
+    // text-anchor: adjust origin
+    if (textAnchor === "middle") {
+      itext.set("originX", "center");
+    } else if (textAnchor === "end") {
+      itext.set("originX", "right");
+    }
+
+    // letter-spacing (SVG px → Fabric charSpacing in 1/1000 em)
+    if (letterSpacing) {
+      const px = parseFloat(letterSpacing);
+      itext.set("charSpacing", (px / fontSize) * 1000);
+    }
+
+    textObjects.push(itext);
+    t.parentNode?.removeChild(t);
+  }
+
+  const strippedSvg = new XMLSerializer().serializeToString(svgEl);
+  return { strippedSvg, textObjects };
+}
+
 // --- SVG Import from server ---
 async function loadSvgToCanvas(svgString: string) {
   skipSave = true;
@@ -265,14 +438,21 @@ async function loadSvgToCanvas(svgString: string) {
     canvas.backgroundColor = bgColor;
   }
 
+  // Extract text manually (Fabric SVG parser drops <text> elements)
+  const { strippedSvg, textObjects } = extractTextElements(svgString);
+
   try {
-    const { objects } = await loadSVGFromString(svgString);
-    const validObjects = objects.filter((o): o is FabricObject => o !== null);
-    for (const obj of validObjects) {
-      canvas.add(obj);
+    const { objects } = await loadSVGFromString(strippedSvg);
+    for (const obj of objects) {
+      if (obj) canvas.add(toEditable(obj));
     }
   } catch (e) {
     console.error("SVG parse error:", e);
+  }
+
+  // Add manually-parsed text objects
+  for (const t of textObjects) {
+    canvas.add(t);
   }
 
   canvas.requestRenderAll();
@@ -284,20 +464,95 @@ async function loadSvgToCanvas(svgString: string) {
   undoStack.push(JSON.stringify(canvas.toJSON()));
 }
 
+function clearCanvas() {
+  skipSave = true;
+  canvas.clear();
+  canvas.backgroundColor = "#ffffff";
+  canvas.requestRenderAll();
+  skipSave = false;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  undoStack.push(JSON.stringify(canvas.toJSON()));
+}
+
 async function addSvgFragment(fragment: string) {
-  // Wrap fragment in an SVG root for parsing
   const wrappedSvg = `<svg xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`;
+
+  // Extract text manually (Fabric SVG parser drops <text> elements)
+  const { strippedSvg, textObjects } = extractTextElements(wrappedSvg);
+
   try {
-    const { objects } = await loadSVGFromString(wrappedSvg);
-    const validObjects = objects.filter((o): o is FabricObject => o !== null);
-    for (const obj of validObjects) {
-      canvas.add(obj);
+    const { objects } = await loadSVGFromString(strippedSvg);
+    for (const obj of objects) {
+      if (obj) canvas.add(toEditable(obj));
     }
-    canvas.requestRenderAll();
-    saveState();
   } catch (e) {
     console.error("SVG fragment parse error:", e);
   }
+
+  // Add manually-parsed text objects
+  for (const t of textObjects) {
+    canvas.add(t);
+  }
+
+  canvas.requestRenderAll();
+  saveState();
+}
+
+// --- Lock / Unlock ---
+function lockAllObjects() {
+  for (const obj of canvas.getObjects()) {
+    (obj as any).locked = true;
+    obj.set({
+      selectable: false,
+      evented: false,
+      hasControls: false,
+      lockMovementX: true,
+      lockMovementY: true,
+    });
+  }
+  canvas.discardActiveObject();
+  canvas.requestRenderAll();
+}
+
+function unlockAllObjects() {
+  for (const obj of canvas.getObjects()) {
+    (obj as any).locked = false;
+    obj.set({
+      selectable: true,
+      evented: true,
+      hasControls: true,
+      lockMovementX: false,
+      lockMovementY: false,
+    });
+  }
+  canvas.requestRenderAll();
+}
+
+function reapplyLockState() {
+  for (const obj of canvas.getObjects()) {
+    if ((obj as any).locked) {
+      obj.set({
+        selectable: false,
+        evented: false,
+        hasControls: false,
+        lockMovementX: true,
+        lockMovementY: true,
+      });
+    }
+  }
+}
+
+// --- Load Canvas JSON (for templates) ---
+async function loadCanvasJson(jsonStr: string) {
+  skipSave = true;
+  await canvas.loadFromJSON(jsonStr);
+  reapplyLockState();
+  canvas.requestRenderAll();
+  skipSave = false;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  undoStack.push(JSON.stringify(canvas.toJSON()));
 }
 
 // --- WebSocket Connection ---
@@ -323,6 +578,43 @@ function connectWebSocket() {
           break;
         case "add_element":
           addSvgFragment(msg.svg_fragment);
+          break;
+        case "clear":
+          clearCanvas();
+          break;
+        case "focus":
+          window.focus();
+          break;
+        case "add_textbox": {
+          const opts = msg.options;
+          const tb = new Textbox(opts.text || "Text", {
+            left: opts.x,
+            top: opts.y,
+            width: opts.width,
+            fontSize: opts.fontSize || 20,
+            fill: opts.fill || "#000000",
+            fontFamily: opts.fontFamily || "sans-serif",
+          });
+          canvas.add(tb);
+          canvas.requestRenderAll();
+          saveState();
+          break;
+        }
+        case "lock_all":
+          lockAllObjects();
+          break;
+        case "unlock_all":
+          unlockAllObjects();
+          break;
+        case "request_json":
+          ws!.send(JSON.stringify({
+            type: "canvas_json",
+            request_id: msg.request_id,
+            json: JSON.stringify(canvas.toJSON()),
+          }));
+          break;
+        case "load_json":
+          loadCanvasJson(msg.json);
           break;
         case "ping":
           ws!.send(JSON.stringify({ type: "pong" }));

@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
-import type { CanvasSession, ClientMessage, ServerMessage } from "./types.js";
+import type { CanvasSession, ClientMessage, ServerMessage, TextboxOptions } from "./types.js";
 
 // When running from source (*.ts), dist is at ./dist/
 // When running compiled (dist/index.js), dist is the current dir
@@ -18,6 +18,7 @@ export class CanvasManager {
   private sessions = new Map<string, CanvasSession>();
   private port = 0;
   private wss: WebSocketServer | null = null;
+  private jsonCallbacks = new Map<string, (json: string) => void>();
 
   async start(): Promise<number> {
     const app = express();
@@ -95,6 +96,14 @@ export class CanvasManager {
             session.svg = msg.svg;
             break;
           }
+        }
+        break;
+      }
+      case "canvas_json": {
+        const cb = this.jsonCallbacks.get(msg.request_id);
+        if (cb) {
+          this.jsonCallbacks.delete(msg.request_id);
+          cb(msg.json);
         }
         break;
       }
@@ -182,6 +191,25 @@ export class CanvasManager {
     }));
   }
 
+  clearCanvas(name: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    session.svg = DEFAULT_SVG;
+    if (session.ws) {
+      this.send(session.ws, { type: "clear" });
+    }
+    return true;
+  }
+
+  focusCanvas(name: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "focus" });
+    }
+    return true;
+  }
+
   closeCanvas(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
@@ -191,5 +219,100 @@ export class CanvasManager {
     }
     this.sessions.delete(name);
     return true;
+  }
+
+  // --- Textbox ---
+
+  addTextbox(name: string, options: TextboxOptions): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "add_textbox", options });
+    }
+    return true;
+  }
+
+  // --- Lock/Unlock ---
+
+  lockObjects(name: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "lock_all" });
+    }
+    return true;
+  }
+
+  unlockObjects(name: string): boolean {
+    const session = this.sessions.get(name);
+    if (!session) return false;
+    if (session.ws) {
+      this.send(session.ws, { type: "unlock_all" });
+    }
+    return true;
+  }
+
+  // --- Canvas JSON (for templates) ---
+
+  requestCanvasJson(session: CanvasSession): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("No connected editor"));
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        this.jsonCallbacks.delete(requestId);
+        reject(new Error("Timeout waiting for canvas JSON"));
+      }, 5000);
+
+      this.jsonCallbacks.set(requestId, (json) => {
+        clearTimeout(timeout);
+        resolve(json);
+      });
+
+      this.send(session.ws, { type: "request_json", request_id: requestId });
+    });
+  }
+
+  // --- Templates ---
+
+  private get templatesDir(): string {
+    return path.join(import.meta.dirname, "..", "templates");
+  }
+
+  async saveTemplate(canvasName: string, templateName: string): Promise<string> {
+    const session = this.sessions.get(canvasName);
+    if (!session) throw new Error(`Canvas "${canvasName}" not found`);
+
+    const json = await this.requestCanvasJson(session);
+    const dir = this.templatesDir;
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const filePath = path.join(dir, `${templateName}.json`);
+    fs.writeFileSync(filePath, json, "utf-8");
+    return filePath;
+  }
+
+  loadTemplate(canvasName: string, templateName: string): boolean {
+    const session = this.sessions.get(canvasName);
+    if (!session) return false;
+
+    const filePath = path.join(this.templatesDir, `${templateName}.json`);
+    if (!fs.existsSync(filePath)) return false;
+
+    const json = fs.readFileSync(filePath, "utf-8");
+    if (session.ws) {
+      this.send(session.ws, { type: "load_json", json });
+    }
+    return true;
+  }
+
+  listTemplates(): string[] {
+    const dir = this.templatesDir;
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.replace(/\.json$/, ""));
   }
 }

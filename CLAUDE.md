@@ -22,7 +22,15 @@ npm start        # node dist/index.js --stdio
 - `sketch_get_svg` - read SVG (base64 images truncated at 25KB)
 - `sketch_set_svg` - replace entire canvas SVG
 - `sketch_add_element` - add SVG fragment without clearing
+- `sketch_add_textbox` - add fixed-width Textbox with word wrapping
+- `sketch_lock_objects` - lock all objects (non-selectable/movable)
+- `sketch_unlock_objects` - unlock all objects
+- `sketch_save_template` - save canvas as JSON template (preserves Textbox widths + lock state)
+- `sketch_load_template` - load JSON template into canvas
+- `sketch_list_templates` - list saved templates
 - `sketch_list_canvases` - list active sessions
+- `sketch_clear_canvas` - clear canvas to blank
+- `sketch_focus_canvas` - bring canvas window to front
 - `sketch_close_canvas` - close canvas + browser
 
 ## Key Files

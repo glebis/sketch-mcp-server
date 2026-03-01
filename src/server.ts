@@ -1,7 +1,28 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
-import { exec } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import type { CanvasManager } from "./canvas-manager.js";
+
+function openAppWindow(url: string): void {
+  // Try Chrome --app mode first (standalone window, no tabs/address bar)
+  const chromePaths = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  ];
+  for (const bin of chromePaths) {
+    try {
+      execSync(`test -f "${bin}"`, { stdio: "ignore" });
+      exec(`"${bin}" --app="${url}" --new-window`);
+      return;
+    } catch {
+      // not found, try next
+    }
+  }
+  // Fallback: default browser
+  exec(`open "${url}"`);
+}
 
 export function createMcpServer(canvasManager: CanvasManager): McpServer {
   const server = new McpServer({
@@ -16,7 +37,7 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
     async ({ name }) => {
       const canvasName = name || "default";
       const { url, isNew } = canvasManager.openCanvas(canvasName);
-      exec(`open "${url}"`);
+      openAppWindow(url);
       return {
         content: [{
           type: "text",
@@ -95,6 +116,41 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
   );
 
   server.tool(
+    "sketch_clear_canvas",
+    "Clear all content from a canvas, resetting it to a blank state. Use before streaming new content with sketch_add_element.",
+    { canvas_name: z.string().describe("Name of the canvas") },
+    async ({ canvas_name }) => {
+      if (!canvasManager.clearCanvas(canvas_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Canvas "${canvas_name}" cleared.` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_focus_canvas",
+    "Bring the canvas browser window to the foreground.",
+    { canvas_name: z.string().describe("Name of the canvas") },
+    async ({ canvas_name }) => {
+      if (!canvasManager.focusCanvas(canvas_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      // Also try macOS-level window activation for reliability
+      try {
+        const { exec: execCb } = await import("node:child_process");
+        execCb(`osascript -e 'tell application "System Events" to set frontmost of (first process whose name contains "Chrome") to true'`);
+      } catch {}
+      return { content: [{ type: "text", text: `Focused canvas "${canvas_name}".` }] };
+    }
+  );
+
+  server.tool(
     "sketch_close_canvas",
     "Close a canvas session and its browser editor.",
     { canvas_name: z.string().describe("Name of the canvas to close") },
@@ -106,6 +162,117 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
         };
       }
       return { content: [{ type: "text", text: `Canvas "${canvas_name}" closed.` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_add_textbox",
+    "Add a fixed-width text area (Textbox) to a canvas. Supports word wrapping. Use for editable text regions in templates.",
+    {
+      canvas_name: z.string().describe("Name of the canvas"),
+      x: z.number().describe("X position"),
+      y: z.number().describe("Y position"),
+      width: z.number().describe("Width of the text area"),
+      text: z.string().optional().describe("Initial text content (default: 'Text')"),
+      font_size: z.number().optional().describe("Font size in px (default: 20)"),
+      fill: z.string().optional().describe("Text color (default: '#000000')"),
+      font_family: z.string().optional().describe("Font family (default: 'sans-serif')"),
+    },
+    async ({ canvas_name, x, y, width, text, font_size, fill, font_family }) => {
+      if (!canvasManager.addTextbox(canvas_name, {
+        x, y, width,
+        text: text ?? undefined,
+        fontSize: font_size ?? undefined,
+        fill: fill ?? undefined,
+        fontFamily: font_family ?? undefined,
+      })) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Textbox added to "${canvas_name}" at (${x}, ${y}) width=${width}.` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_lock_objects",
+    "Lock all current objects on the canvas so they cannot be selected or moved. Objects added after locking remain editable.",
+    { canvas_name: z.string().describe("Name of the canvas") },
+    async ({ canvas_name }) => {
+      if (!canvasManager.lockObjects(canvas_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `All objects on "${canvas_name}" locked.` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_unlock_objects",
+    "Unlock all objects on the canvas, restoring selectability and movement.",
+    { canvas_name: z.string().describe("Name of the canvas") },
+    async ({ canvas_name }) => {
+      if (!canvasManager.unlockObjects(canvas_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `All objects on "${canvas_name}" unlocked.` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_save_template",
+    "Save the current canvas state as a reusable JSON template. Preserves Textbox widths, lock states, and all object properties.",
+    {
+      canvas_name: z.string().describe("Name of the canvas to save from"),
+      template_name: z.string().describe("Name for the template (no extension)"),
+    },
+    async ({ canvas_name, template_name }) => {
+      try {
+        const filePath = await canvasManager.saveTemplate(canvas_name, template_name);
+        return { content: [{ type: "text", text: `Template "${template_name}" saved to ${filePath}` }] };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text", text: e.message }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
+    "sketch_load_template",
+    "Load a previously saved JSON template into a canvas, replacing current content.",
+    {
+      canvas_name: z.string().describe("Name of the canvas to load into"),
+      template_name: z.string().describe("Name of the template to load"),
+    },
+    async ({ canvas_name, template_name }) => {
+      if (!canvasManager.loadTemplate(canvas_name, template_name)) {
+        return {
+          content: [{ type: "text", text: `Canvas "${canvas_name}" or template "${template_name}" not found.` }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: `Template "${template_name}" loaded into "${canvas_name}".` }] };
+    }
+  );
+
+  server.tool(
+    "sketch_list_templates",
+    "List all saved canvas templates.",
+    {},
+    async () => {
+      const templates = canvasManager.listTemplates();
+      if (templates.length === 0) {
+        return { content: [{ type: "text", text: "No templates saved yet." }] };
+      }
+      return { content: [{ type: "text", text: templates.map((t) => `- ${t}`).join("\n") }] };
     }
   );
 
