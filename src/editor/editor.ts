@@ -1,4 +1,4 @@
-import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, PencilBrush, IText, Textbox, FabricText, FabricObject, FabricImage, Point, loadSVGFromString } from "fabric";
+import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, PencilBrush, IText, Textbox, FabricText, FabricObject, FabricImage, Path, Point, loadSVGFromString } from "fabric";
 import type { ToolType } from "./toolbar.ts";
 import { initToolbar } from "./toolbar.ts";
 import { initClipboardHandler } from "./clipboard.ts";
@@ -265,7 +265,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // --- Toolbar ---
-const toolbarState = initToolbar({
+const toolbar = initToolbar({
   onToolChange: (tool) => {
     currentTool = tool;
     applyToolMode();
@@ -285,6 +285,7 @@ const toolbarState = initToolbar({
   onUndo: undo,
   onRedo: redo,
 });
+const toolbarState = toolbar.state;
 
 function updateSelectedObjects(prop: string, value: any) {
   const active = canvas.getActiveObjects();
@@ -318,6 +319,15 @@ function applyToolMode() {
 // --- Shape Drawing ---
 canvas.on("mouse:down", (opt) => {
   if (currentTool === "select" || currentTool === "draw") return;
+
+  // If clicking on an existing object, select it instead of drawing over it
+  const target = (opt as any).target as FabricObject | undefined;
+  if (target && target.selectable && target.evented) {
+    toolbar.setActiveTool("select");
+    canvas.setActiveObject(target);
+    canvas.requestRenderAll();
+    return;
+  }
 
   if (currentTool === "text") {
     const pointer = canvas.getScenePoint(opt.e);
@@ -595,35 +605,44 @@ function extractTextElements(svgString: string): { strippedSvg: string; textObje
   const textObjects: IText[] = [];
 
   for (const t of textEls) {
-    const x = parseFloat(t.getAttribute("x") || "0");
-    const y = parseFloat(t.getAttribute("y") || "0");
     const fontSize = parseFloat(t.getAttribute("font-size") || "16");
     const fill = t.getAttribute("fill") || "#000000";
     const fontFamily = t.getAttribute("font-family") || "sans-serif";
     const fontWeight = t.getAttribute("font-weight") || "normal";
-    const textContent = t.textContent || "";
-    const textAnchor = t.getAttribute("text-anchor");
     const letterSpacing = t.getAttribute("letter-spacing");
 
-    // SVG y = baseline; Fabric top = bounding box top. Offset ~80% of fontSize.
-    let left = x;
-    const top = y - fontSize * 0.82;
+    // Preserve line breaks from <tspan> elements
+    const tspans = t.querySelectorAll("tspan");
+    const textContent = tspans.length > 0
+      ? Array.from(tspans).map(ts => ts.textContent || "").join("\n")
+      : (t.textContent || "");
 
+    // Fabric.js wraps <text> in <g transform="matrix(1 0 0 1 cx cy)">
+    // where cx,cy is the object center. Parse from parent <g>.
+    let cx = 0, cy = 0;
+    const parentG = t.parentElement;
+    if (parentG?.tagName === "g") {
+      const gTransform = parentG.getAttribute("transform");
+      if (gTransform) {
+        const matrixMatch = gTransform.match(/matrix\(\s*([^\s,]+)[\s,]+([^\s,]+)[\s,]+([^\s,]+)[\s,]+([^\s,]+)[\s,]+([^\s,]+)[\s,]+([^\s,)]+)/);
+        if (matrixMatch) {
+          cx = parseFloat(matrixMatch[5]);
+          cy = parseFloat(matrixMatch[6]);
+        }
+      }
+    }
+
+    // Position using center origin (matches Fabric's SVG export)
     const itext = new IText(textContent, {
-      left,
-      top,
+      left: cx,
+      top: cy,
+      originX: "center",
+      originY: "center",
       fontSize,
       fill,
       fontFamily,
       fontWeight: fontWeight === "bold" ? "bold" : "normal",
     });
-
-    // text-anchor: adjust origin
-    if (textAnchor === "middle") {
-      itext.set("originX", "center");
-    } else if (textAnchor === "end") {
-      itext.set("originX", "right");
-    }
 
     // letter-spacing (SVG px → Fabric charSpacing in 1/1000 em)
     if (letterSpacing) {
@@ -632,7 +651,12 @@ function extractTextElements(svgString: string): { strippedSvg: string; textObje
     }
 
     textObjects.push(itext);
+    // Remove the parent <g> wrapper too (now empty)
+    const parent = t.parentNode;
     t.parentNode?.removeChild(t);
+    if (parent && parent !== svgEl && parent.childNodes.length === 0) {
+      parent.parentNode?.removeChild(parent);
+    }
   }
 
   const strippedSvg = new XMLSerializer().serializeToString(svgEl);
@@ -773,6 +797,54 @@ async function loadCanvasJson(jsonStr: string) {
   undoStack.push(JSON.stringify(canvas.toJSON()));
 }
 
+// --- Mobile QR Code ---
+let mobileUrl: string | null = null;
+let mobileQrDataUrl: string | null = null;
+
+const mobileOverlay = document.createElement("div");
+mobileOverlay.className = "mobile-overlay";
+mobileOverlay.style.display = "none";
+mobileOverlay.innerHTML = `
+  <div class="mobile-modal">
+    <div class="mobile-modal-header">
+      <span>Open on Phone</span>
+      <button class="mobile-modal-close">&times;</button>
+    </div>
+    <div class="mobile-modal-body">
+      <img class="mobile-qr" alt="QR Code">
+      <p class="mobile-url"></p>
+      <p class="mobile-hint">Scan with your phone camera (same Wi-Fi network)</p>
+    </div>
+  </div>
+`;
+document.body.appendChild(mobileOverlay);
+
+mobileOverlay.querySelector(".mobile-modal-close")!.addEventListener("click", () => {
+  mobileOverlay.style.display = "none";
+});
+mobileOverlay.addEventListener("click", (e) => {
+  if (e.target === mobileOverlay) mobileOverlay.style.display = "none";
+});
+
+// Add phone button to toolbar
+const phoneBtn = document.createElement("button");
+phoneBtn.className = "tool-btn phone-btn";
+phoneBtn.title = "Open on phone";
+phoneBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="4" y="1" width="8" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="8" cy="13" r="0.8" fill="currentColor"/></svg>`;
+phoneBtn.style.display = "none";
+phoneBtn.addEventListener("click", () => {
+  mobileOverlay.style.display = "flex";
+});
+document.getElementById("toolbar")!.appendChild(phoneBtn);
+
+function showMobileInfo(url: string, qrDataUrl: string) {
+  mobileUrl = url;
+  mobileQrDataUrl = qrDataUrl;
+  (mobileOverlay.querySelector(".mobile-qr") as HTMLImageElement).src = qrDataUrl;
+  mobileOverlay.querySelector(".mobile-url")!.textContent = url;
+  phoneBtn.style.display = "";
+}
+
 // --- WebSocket Connection ---
 function connectWebSocket() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -860,6 +932,72 @@ function connectWebSocket() {
           break;
         case "zoom_to_fit":
           zoomToFit();
+          break;
+        case "update_textbox": {
+          const objects = canvas.getObjects();
+          const target = objects[msg.object_index];
+          if (target && target instanceof Textbox) {
+            target.set("text", msg.text);
+            canvas.requestRenderAll();
+            saveState();
+          }
+          break;
+        }
+        case "draw_points": {
+          // Live stroke preview from mobile -- draw temporary line segments
+          // These are ephemeral; the final path arrives via draw_complete
+          const pts: Array<{ x: number; y: number }> = msg.points;
+          if (pts.length >= 2) {
+            for (let i = 0; i < pts.length - 1; i++) {
+              const seg = new Line([pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y], {
+                stroke: msg.color,
+                strokeWidth: msg.width,
+                strokeLineCap: "round",
+                selectable: false,
+                evented: false,
+              });
+              (seg as any)._mobilePreview = true;
+              canvas.add(seg);
+            }
+            canvas.requestRenderAll();
+          }
+          break;
+        }
+        case "draw_complete": {
+          // Remove preview lines
+          const previews = canvas.getObjects().filter((o: any) => o._mobilePreview);
+          for (const p of previews) canvas.remove(p);
+
+          // Add the final path
+          try {
+            const pathData = JSON.parse(msg.path_data);
+            Path.fromObject(pathData).then((pathObj: any) => {
+              canvas.add(pathObj);
+              canvas.requestRenderAll();
+              saveState();
+            });
+          } catch {
+            // ignore malformed path data
+          }
+          break;
+        }
+        case "add_image": {
+          const imgEl = new Image();
+          imgEl.onload = () => {
+            const fabricImg = new FabricImage(imgEl, {
+              left: msg.x,
+              top: msg.y,
+            });
+            fabricImg.scaleToWidth(msg.width);
+            canvas.add(fabricImg);
+            canvas.requestRenderAll();
+            saveState();
+          };
+          imgEl.src = `data:image/jpeg;base64,${msg.data_base64}`;
+          break;
+        }
+        case "mobile_info":
+          showMobileInfo(msg.url, msg.qr_data_url);
           break;
         case "ping":
           ws!.send(JSON.stringify({ type: "pong" }));
