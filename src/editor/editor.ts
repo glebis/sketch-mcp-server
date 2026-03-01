@@ -60,6 +60,7 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
+let spaceHeld = false;
 
 // Zoom indicator (auto-hides after 2s, visible on hover + click to cycle)
 const zoomIndicator = document.createElement("div");
@@ -126,10 +127,33 @@ canvas.on("mouse:wheel", (opt) => {
   updateZoomIndicator();
 });
 
-// Middle-click drag pan
+// Space+drag pan (like Figma)
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !spaceHeld) {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    const active = canvas.getActiveObject();
+    if (active instanceof IText && active.isEditing) return;
+    e.preventDefault();
+    spaceHeld = true;
+    canvas.defaultCursor = "grab";
+    canvas.selection = false;
+  }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.code === "Space" && spaceHeld) {
+    spaceHeld = false;
+    if (!isPanning) {
+      applyToolMode();
+    }
+  }
+});
+
+// Middle-click or space+click drag pan
 canvas.on("mouse:down", (opt) => {
   const e = opt.e as MouseEvent;
-  if (e.button === 1) {
+  if (e.button === 1 || (e.button === 0 && spaceHeld)) {
     isPanning = true;
     panStart = { x: e.clientX, y: e.clientY };
     canvas.defaultCursor = "grabbing";
@@ -263,6 +287,14 @@ document.addEventListener("keydown", (e) => {
         a.download = `${canvasName}.png`;
         a.click();
       }
+      break;
+    case "e": // Cmd+E -- export canvas as JSON
+      e.preventDefault();
+      exportCanvasJson();
+      break;
+    case "o": // Cmd+O -- import canvas from JSON
+      e.preventDefault();
+      importCanvasJson();
       break;
   }
 
@@ -814,6 +846,36 @@ async function loadCanvasJson(jsonStr: string) {
   redoStack.length = 0;
   undoStack.push(JSON.stringify(canvas.toJSON()));
   buildFormPanel();
+}
+
+// --- Export / Import Canvas ---
+function exportCanvasJson() {
+  const json = JSON.stringify(canvas.toJSON(), null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${canvasName}.canvas.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importCanvasJson() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    try {
+      JSON.parse(text); // validate
+      await loadCanvasJson(text);
+      saveState();
+    } catch {
+      console.error("Invalid canvas JSON file");
+    }
+  });
+  input.click();
 }
 
 // --- Form Panel ---
