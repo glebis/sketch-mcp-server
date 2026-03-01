@@ -1,0 +1,25 @@
+{
+  "feature": "Mobile input page with touch drawing, text editing, and photo capture",
+  "framework": "vitest",
+  "language": "typescript",
+  "test_command": "npx vitest run",
+  "source_dir": "src/",
+  "doc_context": "See docs/plans/2026-03-01-mobile-input-design.md",
+  "auto_mode": false,
+  "dry_run": false,
+  "slices": [
+    {"name": "Multi-client WebSocket", "layer": "application", "status": "done"},
+    {"name": "LAN binding", "layer": "application", "status": "done"},
+    {"name": "Mobile route", "layer": "application", "status": "done"},
+    {"name": "Canvas textbox discovery", "layer": "application", "status": "done"},
+    {"name": "Text field updates", "layer": "application", "status": "done"},
+    {"name": "Drawing path sync", "layer": "application", "status": "done"},
+    {"name": "Photo upload", "layer": "application", "status": "done"},
+    {"name": "Mobile page tabs", "layer": "application", "status": "done"}
+  ],
+  "current_slice": 8,
+  "phase": "complete",
+  "layer_map": {},
+  "files_modified": ["src/types.ts", "src/canvas-manager.ts", "src/main.ts", "src/editor/editor.ts", "src/mobile/index.html", "src/mobile/mobile.ts", "src/mobile/mobile.css", "vite.config.ts", "tsconfig.json", "package.json"],
+  "test_files_created": ["tests/canvas-manager.test.ts"]
+}
