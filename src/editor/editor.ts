@@ -613,6 +613,15 @@ function connectWebSocket() {
             json: JSON.stringify(canvas.toJSON()),
           }));
           break;
+        case "request_screenshot": {
+          const dataUrl = canvas.toDataURL({ format: "png" });
+          ws!.send(JSON.stringify({
+            type: "canvas_screenshot",
+            request_id: msg.request_id,
+            data_url: dataUrl,
+          }));
+          break;
+        }
         case "load_json":
           loadCanvasJson(msg.json);
           break;

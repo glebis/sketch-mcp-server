@@ -19,6 +19,7 @@ export class CanvasManager {
   private port = 0;
   private wss: WebSocketServer | null = null;
   private jsonCallbacks = new Map<string, (json: string) => void>();
+  private screenshotCallbacks = new Map<string, (dataUrl: string) => void>();
 
   async start(): Promise<number> {
     const app = express();
@@ -78,6 +79,10 @@ export class CanvasManager {
     return this.port;
   }
 
+  getSession(name: string): CanvasSession | undefined {
+    return this.sessions.get(name);
+  }
+
   private handleClientMessage(ws: WebSocket, msg: ClientMessage): void {
     switch (msg.type) {
       case "ready": {
@@ -104,6 +109,14 @@ export class CanvasManager {
         if (cb) {
           this.jsonCallbacks.delete(msg.request_id);
           cb(msg.json);
+        }
+        break;
+      }
+      case "canvas_screenshot": {
+        const cb = this.screenshotCallbacks.get(msg.request_id);
+        if (cb) {
+          this.screenshotCallbacks.delete(msg.request_id);
+          cb(msg.data_url);
         }
         break;
       }
@@ -272,6 +285,27 @@ export class CanvasManager {
       });
 
       this.send(session.ws, { type: "request_json", request_id: requestId });
+    });
+  }
+
+  requestCanvasScreenshot(session: CanvasSession): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("No connected editor"));
+        return;
+      }
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        this.screenshotCallbacks.delete(requestId);
+        reject(new Error("Timeout waiting for canvas screenshot"));
+      }, 5000);
+
+      this.screenshotCallbacks.set(requestId, (dataUrl) => {
+        clearTimeout(timeout);
+        resolve(dataUrl);
+      });
+
+      this.send(session.ws, { type: "request_screenshot", request_id: requestId });
     });
   }
 

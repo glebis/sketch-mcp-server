@@ -29,6 +29,7 @@ npm start        # node dist/index.js --stdio
 - `sketch_load_template` - load JSON template into canvas
 - `sketch_list_templates` - list saved templates
 - `sketch_list_canvases` - list active sessions
+- `sketch_capture_screenshot` - capture PNG screenshot of canvas (returns image)
 - `sketch_clear_canvas` - clear canvas to blank
 - `sketch_focus_canvas` - bring canvas window to front
 - `sketch_close_canvas` - close canvas + browser

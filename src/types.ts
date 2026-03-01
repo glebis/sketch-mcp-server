@@ -19,6 +19,7 @@ export type ServerMessage =
   | { type: "lock_all" }
   | { type: "unlock_all" }
   | { type: "request_json"; request_id: string }
+  | { type: "request_screenshot"; request_id: string }
   | { type: "load_json"; json: string };
 
 export interface TextboxOptions {
@@ -36,4 +37,5 @@ export type ClientMessage =
   | { type: "canvas_update"; svg: string }
   | { type: "ready"; canvas_name: string }
   | { type: "pong" }
-  | { type: "canvas_json"; request_id: string; json: string };
+  | { type: "canvas_json"; request_id: string; json: string }
+  | { type: "canvas_screenshot"; request_id: string; data_url: string };

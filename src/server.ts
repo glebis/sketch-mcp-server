@@ -166,6 +166,33 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
   );
 
   server.tool(
+    "sketch_capture_screenshot",
+    "Capture a PNG screenshot of the canvas as it currently appears in the browser. Returns the image directly.",
+    { canvas_name: z.string().describe("Name of the canvas") },
+    async ({ canvas_name }) => {
+      try {
+        const session = canvasManager.getSession(canvas_name);
+        if (!session) {
+          return {
+            content: [{ type: "text" as const, text: `Canvas "${canvas_name}" not found.` }],
+            isError: true,
+          };
+        }
+        const dataUrl = await canvasManager.requestCanvasScreenshot(session);
+        const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+        return {
+          content: [{ type: "image" as const, data: base64, mimeType: "image/png" as const }],
+        };
+      } catch (e: any) {
+        return {
+          content: [{ type: "text" as const, text: e.message }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  server.tool(
     "sketch_add_textbox",
     "Add a fixed-width text area (Textbox) to a canvas. Supports word wrapping. Use for editable text regions in templates.",
     {
