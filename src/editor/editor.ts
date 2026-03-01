@@ -154,16 +154,28 @@ function zoomToFit() {
   updateZoomIndicator();
 }
 
-// Keyboard shortcuts for zoom
+// Keyboard shortcuts
 document.addEventListener("keydown", (e) => {
-  const mod = e.metaKey || e.ctrlKey;
-  if (!mod) return;
-
   // Prevent if typing in input/textarea
   const tag = (e.target as HTMLElement).tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;
   const active = canvas.getActiveObject();
   if (active instanceof IText && active.isEditing) return;
+
+  // Shift+. (">") -- toggle toolbar
+  if (e.shiftKey && e.key === ">" && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    const toolbar = document.getElementById("toolbar")!;
+    const hidden = toolbar.style.display === "none";
+    toolbar.style.display = hidden ? "" : "none";
+    // Resize canvas to fill freed/lost space
+    canvas.setDimensions({ width: container.clientWidth, height: container.clientHeight });
+    canvas.requestRenderAll();
+    return;
+  }
+
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return;
 
   switch (e.key) {
     case "0": // Reset to 100%, reset pan
@@ -194,6 +206,27 @@ document.addEventListener("keydown", (e) => {
         updateZoomIndicator();
       }
       break;
+    case "s": // Cmd+S -- download as PNG
+      e.preventDefault();
+      {
+        const dataUrl = canvas.toDataURL({ format: "png" });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `${canvasName}.png`;
+        a.click();
+      }
+      break;
+  }
+
+  // Cmd+Shift+C -- copy image to clipboard
+  if (e.key.toLowerCase() === "c" && e.shiftKey) {
+    e.preventDefault();
+    canvas.toCanvasElement()
+      .toBlob((blob) => {
+        if (blob) {
+          navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        }
+      }, "image/png");
   }
 });
 
