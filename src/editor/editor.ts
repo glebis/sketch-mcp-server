@@ -53,16 +53,50 @@ const MAX_ZOOM = 10;
 let isPanning = false;
 let panStart = { x: 0, y: 0 };
 
-// Zoom indicator
+// Zoom indicator (auto-hides after 2s, visible on hover + click to cycle)
 const zoomIndicator = document.createElement("div");
 zoomIndicator.className = "zoom-indicator";
 zoomIndicator.textContent = "100%";
 document.body.appendChild(zoomIndicator);
 
+let zoomHideTimer: ReturnType<typeof setTimeout> | null = null;
+let lastCustomZoom = 1; // tracks the last non-100%/non-fit zoom level
+
+function showZoomIndicator() {
+  zoomIndicator.classList.add("visible");
+  if (zoomHideTimer) clearTimeout(zoomHideTimer);
+  zoomHideTimer = setTimeout(() => zoomIndicator.classList.remove("visible"), 2000);
+}
+
 function updateZoomIndicator() {
   const pct = Math.round(canvas.getZoom() * 100);
   zoomIndicator.textContent = `${pct}%`;
+  showZoomIndicator();
 }
+
+// Click to cycle: current -> 100% -> fit all -> back to saved
+zoomIndicator.addEventListener("click", () => {
+  const currentZoom = canvas.getZoom();
+  const is100 = Math.abs(currentZoom - 1) < 0.01;
+
+  if (!is100) {
+    // Save current as "custom", then go to 100%
+    lastCustomZoom = currentZoom;
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    updateZoomIndicator();
+  } else {
+    // At 100% -> fit all
+    // Store viewport so next click can restore custom
+    zoomToFit();
+    const fitZoom = canvas.getZoom();
+    // If fit == 100% (content fits naturally), restore custom instead
+    if (Math.abs(fitZoom - 1) < 0.01 && Math.abs(lastCustomZoom - 1) > 0.01) {
+      canvas.setZoom(lastCustomZoom);
+      canvas.requestRenderAll();
+    }
+    updateZoomIndicator();
+  }
+});
 
 function clampZoom(z: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));

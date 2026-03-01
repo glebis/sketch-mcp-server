@@ -140,10 +140,35 @@ html, body {
 /* Zoom indicator */
 .zoom-indicator {
   position: fixed;
-  bottom: 12px;
-  right: 12px;
+  bottom: 8px;
+  right: 8px;
   font-size: 11px;
   color: #868e96;
-  pointer-events: none;
   font-variant-numeric: tabular-nums;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.25, 1, 0.5, 1),
+              background 0.15s cubic-bezier(0.25, 1, 0.5, 1);
+  user-select: none;
+}
+
+.zoom-indicator:hover {
+  opacity: 1;
+  background: #f1f3f5;
+}
+
+.zoom-indicator:active {
+  background: #e9ecef;
+}
+
+.zoom-indicator.visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zoom-indicator {
+    transition: none;
+  }
 }
