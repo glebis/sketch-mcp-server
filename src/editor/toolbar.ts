@@ -1,4 +1,4 @@
-export type ToolType = "select" | "rect" | "ellipse" | "triangle" | "line" | "draw" | "text";
+export type ToolType = "select" | "rect" | "ellipse" | "triangle" | "line" | "arrow" | "draw" | "text";
 
 export interface ToolbarState {
   tool: ToolType;
@@ -37,6 +37,10 @@ const TOOL_ICONS: Record<ToolType, { label: string; svg: string }> = {
     label: "Line (L)",
     svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="4"/></svg>`,
   },
+  arrow: {
+    label: "Arrow (A)",
+    svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="18" y2="6"/><polyline points="12,4 20,4 20,12"/></svg>`,
+  },
   draw: {
     label: "Draw (D)",
     svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17c3-3 6-8 9-8s3 4 6 1"/></svg>`,
@@ -57,7 +61,7 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
   };
 
   // Tool buttons
-  const toolOrder: ToolType[] = ["select", "rect", "ellipse", "triangle", "line", "draw", "text"];
+  const toolOrder: ToolType[] = ["select", "rect", "ellipse", "triangle", "line", "arrow", "draw", "text"];
   const buttons = new Map<ToolType, HTMLButtonElement>();
 
   for (const tool of toolOrder) {
@@ -149,7 +153,7 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
     const key = e.key.toLowerCase();
     const shortcutMap: Record<string, ToolType> = {
       v: "select", r: "rect", e: "ellipse", t: "triangle",
-      l: "line", d: "draw", x: "text",
+      l: "line", a: "arrow", d: "draw", x: "text",
     };
 
     if (shortcutMap[key] && !e.metaKey && !e.ctrlKey) {
