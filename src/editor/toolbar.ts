@@ -74,6 +74,7 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarHandle {
   for (const tool of toolOrder) {
     const btn = document.createElement("button");
     btn.title = TOOL_ICONS[tool].label;
+    btn.setAttribute("aria-label", TOOL_ICONS[tool].label);
     btn.innerHTML = TOOL_ICONS[tool].svg;
     btn.addEventListener("click", () => setActiveTool(tool));
     toolbar.appendChild(btn);
@@ -96,12 +97,14 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarHandle {
   // Undo/Redo
   const undoBtn = document.createElement("button");
   undoBtn.title = "Undo (Ctrl+Z)";
+  undoBtn.setAttribute("aria-label", "Undo");
   undoBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h13a4 4 0 010 8H9"/><polyline points="7 6 3 10 7 14"/></svg>`;
   undoBtn.addEventListener("click", callbacks.onUndo);
   toolbar.appendChild(undoBtn);
 
   const redoBtn = document.createElement("button");
   redoBtn.title = "Redo (Ctrl+Shift+Z)";
+  redoBtn.setAttribute("aria-label", "Redo");
   redoBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10H8a4 4 0 000 8h7"/><polyline points="17 6 21 10 17 14"/></svg>`;
   redoBtn.addEventListener("click", callbacks.onRedo);
   toolbar.appendChild(redoBtn);
@@ -207,6 +210,7 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarHandle {
 
   const formBtn = document.createElement("button");
   formBtn.title = "Template Fields (F)";
+  formBtn.setAttribute("aria-label", "Template Fields");
   formBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="13" y2="16"/></svg>`;
   formBtn.style.display = "none";
   formBtn.addEventListener("click", () => callbacks.onFormToggle?.());

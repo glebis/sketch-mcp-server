@@ -29,6 +29,9 @@ const mainArea = document.getElementById("main-area")!;
 const container = document.getElementById("canvas-container")!;
 const canvasEl = document.createElement("canvas");
 canvasEl.id = "fabric-canvas";
+canvasEl.setAttribute("role", "application");
+canvasEl.setAttribute("aria-label", `Sketch canvas: ${canvasName}`);
+canvasEl.tabIndex = 0;
 container.appendChild(canvasEl);
 
 const canvas = new FabricCanvas(canvasEl, {
@@ -1021,7 +1024,11 @@ function connectWebSocket() {
 
   ws.onopen = () => {
     connected = true;
-    if (statusDot) statusDot.classList.add("connected");
+    if (statusDot) {
+      statusDot.classList.add("connected");
+      statusDot.setAttribute("aria-label", "Connected");
+      statusDot.setAttribute("title", "Connected");
+    }
     ws!.send(JSON.stringify({ type: "ready", canvas_name: canvasName }));
   };
 
@@ -1179,7 +1186,11 @@ function connectWebSocket() {
 
   ws.onclose = () => {
     connected = false;
-    if (statusDot) statusDot.classList.remove("connected");
+    if (statusDot) {
+      statusDot.classList.remove("connected");
+      statusDot.setAttribute("aria-label", "Disconnected");
+      statusDot.setAttribute("title", "Disconnected");
+    }
     // Reconnect after 2s
     setTimeout(connectWebSocket, 2000);
   };
