@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { exec, execSync } from "node:child_process";
+import QRCode from "qrcode";
 import type { CanvasManager } from "./canvas-manager.js";
 
 function openAppWindow(url: string): void {
@@ -38,12 +39,30 @@ export function createMcpServer(canvasManager: CanvasManager): McpServer {
       const canvasName = name || "default";
       const { url, isNew } = canvasManager.openCanvas(canvasName);
       openAppWindow(url);
-      return {
-        content: [{
+
+      const mobileUrl = canvasManager.getMobileUrl(canvasName);
+      const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: "image/png" }> = [
+        {
           type: "text",
-          text: `${isNew ? "Created" : "Opened"} canvas "${canvasName}". Editor: ${url}`,
-        }],
-      };
+          text: `${isNew ? "Created" : "Opened"} canvas "${canvasName}". Editor: ${url}` +
+            (mobileUrl ? `\nMobile: ${mobileUrl}` : ""),
+        },
+      ];
+
+      if (mobileUrl) {
+        try {
+          const qrDataUrl = await QRCode.toDataURL(mobileUrl, { width: 256, margin: 2 });
+          const base64 = qrDataUrl.replace(/^data:image\/png;base64,/, "");
+          content.push({ type: "image", data: base64, mimeType: "image/png" });
+          // Also log to stderr for terminal visibility
+          const qrText = await QRCode.toString(mobileUrl, { type: "terminal", small: true });
+          console.error(`\n[sketch] Mobile URL for "${canvasName}":\n${mobileUrl}\n${qrText}`);
+        } catch {
+          // QR generation failed, still return the URL
+        }
+      }
+
+      return { content };
     }
   );
 

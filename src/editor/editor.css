@@ -86,6 +86,37 @@ html, body {
   padding: 2px;
 }
 
+/* Color toggle (no-fill / no-stroke) */
+.color-toggle {
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px;
+  padding: 0 !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 3px !important;
+  font-size: 10px !important;
+  line-height: 1;
+  color: #adb5bd;
+  background: #f8f9fa !important;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.color-toggle.active {
+  color: #868e96;
+  background: #fff !important;
+  border-color: #adb5bd !important;
+}
+
+.color-toggle:hover {
+  border-color: #868e96 !important;
+}
+
+#toolbar input[type="color"]:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
 #toolbar input[type="number"] {
   width: 48px;
   height: 28px;
@@ -114,6 +145,13 @@ html, body {
 
 #toolbar .status-dot.connected {
   background: #40c057;
+}
+
+/* Main area (toolbar below, canvas + optional panel) */
+#main-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
 }
 
 /* Canvas container */
@@ -171,4 +209,170 @@ html, body {
   .zoom-indicator {
     transition: none;
   }
+}
+
+/* Mobile QR overlay */
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.mobile-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 320px;
+  overflow: hidden;
+}
+
+.mobile-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e9ecef;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.mobile-modal-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #868e96;
+  cursor: pointer;
+  width: auto;
+  height: auto;
+  padding: 0 4px;
+}
+
+.mobile-modal-close:hover {
+  color: #333;
+  background: none;
+}
+
+.mobile-modal-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-qr {
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+}
+
+.mobile-url {
+  font-size: 12px;
+  color: #495057;
+  word-break: break-all;
+  text-align: center;
+  font-family: "SF Mono", "Menlo", monospace;
+  background: #f8f9fa;
+  padding: 6px 10px;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.mobile-hint {
+  font-size: 12px;
+  color: #868e96;
+  text-align: center;
+}
+
+.phone-btn {
+  margin-left: 4px;
+}
+
+/* Form panel */
+.form-panel {
+  width: 300px;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #dee2e6;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.form-panel.hidden {
+  display: none;
+}
+
+.form-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e9ecef;
+  font-weight: 600;
+  font-size: 13px;
+  color: #495057;
+  flex-shrink: 0;
+}
+
+.form-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #868e96;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.form-panel-close:hover {
+  color: #333;
+}
+
+.form-panel-fields {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+}
+
+.form-field-group {
+  margin-bottom: 14px;
+}
+
+.form-field-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #868e96;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+.form-field-group textarea {
+  width: 100%;
+  min-height: 60px;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #333;
+  resize: vertical;
+  line-height: 1.4;
+  transition: border-color 0.15s;
+}
+
+.form-field-group textarea:focus {
+  outline: none;
+  border-color: #339af0;
+  box-shadow: 0 0 0 2px rgba(51, 154, 240, 0.15);
+}
+
+.form-field-group textarea::placeholder {
+  color: #adb5bd;
 }

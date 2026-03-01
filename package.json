@@ -8,23 +8,28 @@
     "sketch-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc --noEmit && vite build && bun build src/main.ts --outdir dist --target node --entry-naming index.js && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js && chmod +x dist/index.js",
+    "build": "tsc --noEmit && VITE_TARGET=editor vite build && VITE_TARGET=mobile vite build && bun build src/main.ts --outdir dist --target node --entry-naming index.js && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js && chmod +x dist/index.js",
     "dev": "npm run build && node dist/index.js --stdio",
-    "start": "node dist/index.js --stdio"
+    "start": "node dist/index.js --stdio",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",
     "express": "^5.1.0",
+    "qrcode": "^1.5.4",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.5.0",
     "fabric": "^6.6.3",
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
-    "vite-plugin-singlefile": "^2.3.0"
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^4.0.18"
   }
 }

@@ -7,7 +7,7 @@ import { initClipboardHandler } from "./clipboard.ts";
 (window as any).__fabric = { FabricImage };
 
 // Register 'locked' so it survives JSON serialization
-FabricObject.customProperties = [...(FabricObject.customProperties || []), "locked"];
+FabricObject.customProperties = [...(FabricObject.customProperties || []), "locked", "label"];
 
 // --- State ---
 const canvasName = decodeURIComponent(window.location.pathname.split("/").pop() || "default");
@@ -25,6 +25,7 @@ const MAX_UNDO = 50;
 let skipSave = false;
 
 // --- Canvas Setup ---
+const mainArea = document.getElementById("main-area")!;
 const container = document.getElementById("canvas-container")!;
 const canvasEl = document.createElement("canvas");
 canvasEl.id = "fabric-canvas";
@@ -40,12 +41,16 @@ const canvas = new FabricCanvas(canvasEl, {
 
 // Resize handling
 window.addEventListener("resize", () => {
+  resizeCanvas();
+});
+
+function resizeCanvas() {
   canvas.setDimensions({
     width: container.clientWidth,
     height: container.clientHeight,
   });
   canvas.requestRenderAll();
-});
+}
 
 // --- Zoom & Pan ---
 const MIN_ZOOM = 0.1;
@@ -196,6 +201,12 @@ document.addEventListener("keydown", (e) => {
   const active = canvas.getActiveObject();
   if (active instanceof IText && active.isEditing) return;
 
+  // F -- toggle form panel
+  if (e.key === "f" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+    toggleFormPanel();
+    return;
+  }
+
   // Shift+. (">") -- toggle toolbar
   if (e.shiftKey && e.key === ">" && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
@@ -284,6 +295,7 @@ const toolbar = initToolbar({
   },
   onUndo: undo,
   onRedo: redo,
+  onFormToggle: () => toggleFormPanel(),
 });
 const toolbarState = toolbar.state;
 
@@ -579,6 +591,8 @@ function sendCanvasUpdate() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const svg = canvas.toSVG();
   ws.send(JSON.stringify({ type: "canvas_update", svg }));
+  // Also send JSON to preserve Fabric.js properties (labels, locked state) for reconnect
+  ws.send(JSON.stringify({ type: "canvas_json_update", json: JSON.stringify(canvas.toJSON()) }));
 }
 
 // Convert FabricText to IText so double-click editing works
@@ -715,6 +729,7 @@ function clearCanvas() {
   undoStack.length = 0;
   redoStack.length = 0;
   undoStack.push(JSON.stringify(canvas.toJSON()));
+  hideFormPanel();
 }
 
 async function addSvgFragment(fragment: string) {
@@ -795,7 +810,158 @@ async function loadCanvasJson(jsonStr: string) {
   undoStack.length = 0;
   redoStack.length = 0;
   undoStack.push(JSON.stringify(canvas.toJSON()));
+  buildFormPanel();
 }
+
+// --- Form Panel ---
+let formPanelEl: HTMLDivElement | null = null;
+let formPanelVisible = false;
+// Map from canvas object index to textarea element
+let formFieldMap = new Map<number, HTMLTextAreaElement>();
+let formSyncPaused = false;
+
+function buildFormPanel() {
+  // Find unlocked Textbox objects
+  const objects = canvas.getObjects();
+  const editableFields: Array<{ index: number; label: string; text: string }> = [];
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (obj instanceof Textbox && !(obj as any).locked) {
+      const label = (obj as any).label
+        || obj.text?.substring(0, 30).trim()
+        || `Field ${editableFields.length + 1}`;
+      editableFields.push({ index: i, label, text: obj.text || "" });
+    }
+  }
+
+  // No editable fields -- hide panel
+  if (editableFields.length === 0) {
+    hideFormPanel();
+    return;
+  }
+
+  // Create panel if it doesn't exist
+  if (!formPanelEl) {
+    formPanelEl = document.createElement("div");
+    formPanelEl.id = "form-panel";
+    formPanelEl.className = "form-panel";
+    mainArea.appendChild(formPanelEl);
+  }
+
+  formFieldMap.clear();
+
+  formPanelEl.innerHTML = `
+    <div class="form-panel-header">
+      <span>Template Fields</span>
+      <button class="form-panel-close">&times;</button>
+    </div>
+    <div class="form-panel-fields"></div>
+  `;
+
+  const fieldsContainer = formPanelEl.querySelector(".form-panel-fields")!;
+
+  for (const field of editableFields) {
+    const group = document.createElement("div");
+    group.className = "form-field-group";
+
+    const labelEl = document.createElement("label");
+    labelEl.textContent = field.label;
+    group.appendChild(labelEl);
+
+    const textarea = document.createElement("textarea");
+    textarea.value = field.text.replace(/^\n+|\n+$/g, ""); // trim leading/trailing newlines
+    textarea.placeholder = field.label;
+    textarea.dataset.objectIndex = String(field.index);
+    group.appendChild(textarea);
+
+    // Debounced sync: panel -> canvas
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    textarea.addEventListener("input", () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const idx = parseInt(textarea.dataset.objectIndex!, 10);
+        const obj = canvas.getObjects()[idx];
+        if (obj && obj instanceof Textbox) {
+          formSyncPaused = true;
+          obj.set("text", textarea.value);
+          canvas.requestRenderAll();
+          saveState();
+          formSyncPaused = false;
+        }
+      }, 200);
+    });
+
+    fieldsContainer.appendChild(group);
+    formFieldMap.set(field.index, textarea);
+  }
+
+  // Close button
+  formPanelEl.querySelector(".form-panel-close")!.addEventListener("click", () => {
+    toggleFormPanel();
+  });
+
+  // Show toolbar button but keep panel hidden by default
+  formPanelEl.classList.add("hidden");
+  formPanelVisible = false;
+  toolbar.formBtn.style.display = "";
+}
+
+function showFormPanel() {
+  if (!formPanelEl) return;
+  formPanelEl.classList.remove("hidden");
+  formPanelVisible = true;
+  toolbar.formBtn.style.display = "";
+  resizeCanvas();
+}
+
+function hideFormPanel() {
+  if (formPanelEl) {
+    formPanelEl.classList.add("hidden");
+  }
+  formPanelVisible = false;
+  formFieldMap.clear();
+  toolbar.formBtn.style.display = "none";
+  resizeCanvas();
+}
+
+function toggleFormPanel() {
+  if (!formPanelEl || formFieldMap.size === 0) return;
+  if (formPanelVisible) {
+    formPanelEl.classList.add("hidden");
+    formPanelVisible = false;
+  } else {
+    formPanelEl.classList.remove("hidden");
+    formPanelVisible = true;
+  }
+  resizeCanvas();
+}
+
+// Sync canvas -> panel on object:modified
+canvas.on("object:modified", (opt) => {
+  if (formSyncPaused || !formPanelVisible) return;
+  const target = opt.target;
+  if (!target || !(target instanceof Textbox) || (target as any).locked) return;
+
+  const idx = canvas.getObjects().indexOf(target);
+  const textarea = formFieldMap.get(idx);
+  if (textarea) {
+    textarea.value = target.text || "";
+  }
+});
+
+// Also sync when text editing ends (IText "editing:exited" event)
+canvas.on("text:changed", (opt) => {
+  if (formSyncPaused || !formPanelVisible) return;
+  const target = opt.target;
+  if (!target || !(target instanceof Textbox) || (target as any).locked) return;
+
+  const idx = canvas.getObjects().indexOf(target);
+  const textarea = formFieldMap.get(idx);
+  if (textarea) {
+    textarea.value = target.text || "";
+  }
+});
 
 // --- Mobile QR Code ---
 let mobileUrl: string | null = null;

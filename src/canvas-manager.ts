@@ -2,7 +2,9 @@ import express from "express";
 import { createServer } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { WebSocketServer, WebSocket } from "ws";
+import QRCode from "qrcode";
 import type { CanvasSession, ClientMessage, ServerMessage, TextboxOptions } from "./types.js";
 
 // When running from source (*.ts), dist is at ./dist/
@@ -14,12 +16,25 @@ const DIST_DIR = import.meta.filename.endsWith(".ts")
 const DEFAULT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"></svg>`;
 const MAX_SVG_RESPONSE = 25_000;
 
+export interface CanvasManagerOptions {
+  host?: string;
+}
+
 export class CanvasManager {
   private sessions = new Map<string, CanvasSession>();
   private port = 0;
+  private host: string;
   private wss: WebSocketServer | null = null;
   private jsonCallbacks = new Map<string, (json: string) => void>();
   private screenshotCallbacks = new Map<string, (dataUrl: string) => void>();
+
+  constructor(options?: CanvasManagerOptions) {
+    this.host = options?.host ?? "0.0.0.0";
+  }
+
+  getHost(): string {
+    return this.host;
+  }
 
   async start(): Promise<number> {
     const app = express();
@@ -30,6 +45,22 @@ export class CanvasManager {
       const htmlPath = path.join(DIST_DIR, "src", "editor", "index.html");
       if (!fs.existsSync(htmlPath)) {
         res.status(404).send("Editor not built. Run: npm run build");
+        return;
+      }
+      res.sendFile(htmlPath);
+    });
+
+    // Serve mobile input page
+    app.get("/mobile/:canvasName", (_req, res) => {
+      const htmlPath = path.join(DIST_DIR, "src", "mobile", "index.html");
+      if (!fs.existsSync(htmlPath)) {
+        // Serve a minimal inline HTML page as fallback
+        res.type("html").send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sketch Mobile</title></head>
+<body><div id="mobile-app">Loading mobile input...</div>
+<script>window.__CANVAS_NAME__=${JSON.stringify(_req.params.canvasName)};</script>
+</body></html>`);
         return;
       }
       res.sendFile(htmlPath);
@@ -48,11 +79,9 @@ export class CanvasManager {
       });
 
       ws.on("close", () => {
-        // Detach from any session using this ws
+        // Remove from any session's client set
         for (const session of this.sessions.values()) {
-          if (session.ws === ws) {
-            session.ws = null;
-          }
+          session.clients.delete(ws);
         }
       });
     });
@@ -60,14 +89,12 @@ export class CanvasManager {
     // Keepalive pings every 30s
     setInterval(() => {
       for (const session of this.sessions.values()) {
-        if (session.ws?.readyState === WebSocket.OPEN) {
-          this.send(session.ws, { type: "ping" });
-        }
+        this.broadcast(session, { type: "ping" });
       }
     }, 30_000);
 
     return new Promise((resolve) => {
-      server.listen(0, () => {
+      server.listen(0, this.host, () => {
         const addr = server.address();
         this.port = typeof addr === "object" && addr ? addr.port : 0;
         resolve(this.port);
@@ -79,6 +106,25 @@ export class CanvasManager {
     return this.port;
   }
 
+  getLanIp(): string | null {
+    const interfaces = os.networkInterfaces();
+    for (const nets of Object.values(interfaces)) {
+      if (!nets) continue;
+      for (const net of nets) {
+        if (net.family === "IPv4" && !net.internal) {
+          return net.address;
+        }
+      }
+    }
+    return null;
+  }
+
+  getMobileUrl(canvasName: string): string | null {
+    const ip = this.getLanIp();
+    if (!ip) return null;
+    return `http://${ip}:${this.port}/mobile/${encodeURIComponent(canvasName)}`;
+  }
+
   getSession(name: string): CanvasSession | undefined {
     return this.sessions.get(name);
   }
@@ -88,17 +134,40 @@ export class CanvasManager {
       case "ready": {
         const session = this.sessions.get(msg.canvas_name);
         if (session) {
-          session.ws = ws;
-          // Send current SVG to newly connected editor
-          this.send(ws, { type: "set_svg", svg: session.svg });
+          session.clients.add(ws);
+          // Send current state to newly connected client (prefer JSON for template fidelity)
+          if (session.json) {
+            this.send(ws, { type: "load_json", json: session.json });
+          } else {
+            this.send(ws, { type: "set_svg", svg: session.svg });
+          }
+
+          // If mobile client, send textbox info
+          if (msg.client_type === "mobile") {
+            this.sendTextboxInfo(session, ws);
+          } else {
+            // Send mobile URL + QR to editor clients
+            this.sendMobileInfo(msg.canvas_name, ws);
+          }
         }
         break;
       }
       case "canvas_update": {
-        // Find session by ws reference
+        // Find session by ws reference, update SVG, broadcast to others
         for (const session of this.sessions.values()) {
-          if (session.ws === ws) {
+          if (session.clients.has(ws)) {
             session.svg = msg.svg;
+            this.broadcast(session, { type: "set_svg", svg: msg.svg }, ws);
+            break;
+          }
+        }
+        break;
+      }
+      case "canvas_json_update": {
+        // Keep session JSON in sync for reconnect fidelity
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            session.json = msg.json;
             break;
           }
         }
@@ -120,6 +189,69 @@ export class CanvasManager {
         }
         break;
       }
+      case "update_textbox": {
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            this.broadcast(session, {
+              type: "update_textbox",
+              object_index: msg.object_index,
+              text: msg.text,
+            }, ws);
+            break;
+          }
+        }
+        break;
+      }
+      case "draw_points": {
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            const scale = msg.scale_factor;
+            const scaledPoints = msg.points.map((p) => ({
+              x: p.x * scale,
+              y: p.y * scale,
+            }));
+            this.broadcast(session, {
+              type: "draw_points",
+              points: scaledPoints,
+              color: msg.color,
+              width: msg.width,
+              scale_factor: 1,
+            }, ws);
+            break;
+          }
+        }
+        break;
+      }
+      case "draw_complete": {
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            this.broadcast(session, {
+              type: "draw_complete",
+              path_data: msg.path_data,
+              color: msg.color,
+              width: msg.width,
+            }, ws);
+            break;
+          }
+        }
+        break;
+      }
+      case "photo_upload": {
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            this.broadcast(session, {
+              type: "add_image",
+              data_base64: msg.data_base64,
+              x: 100,
+              y: 100,
+              width: msg.width,
+              height: msg.height,
+            }, ws);
+            break;
+          }
+        }
+        break;
+      }
       case "pong":
         break;
     }
@@ -131,6 +263,52 @@ export class CanvasManager {
     }
   }
 
+  private broadcast(session: CanvasSession, msg: ServerMessage, exclude?: WebSocket): void {
+    for (const client of session.clients) {
+      if (client !== exclude) {
+        this.send(client, msg);
+      }
+    }
+  }
+
+  private async sendTextboxInfo(session: CanvasSession, mobileWs: WebSocket): Promise<void> {
+    try {
+      const json = await this.requestCanvasJson(session);
+      const canvasData = JSON.parse(json);
+      const objects: any[] = canvasData.objects ?? [];
+
+      const textboxes = objects
+        .map((obj, index) => ({ obj, index }))
+        .filter(({ obj }) => obj.type === "Textbox" && !obj.locked)
+        .map(({ obj, index }) => ({
+          index,
+          text: obj.text ?? "",
+          label: obj.label || (obj.text ?? "").slice(0, 30) || `Textbox ${index}`,
+        }));
+
+      this.send(mobileWs, { type: "canvas_textboxes", textboxes });
+      this.send(mobileWs, {
+        type: "canvas_dimensions",
+        width: canvasData.width ?? 1200,
+        height: canvasData.height ?? 800,
+      });
+    } catch {
+      // No editor connected or timeout -- send empty list
+      this.send(mobileWs, { type: "canvas_textboxes", textboxes: [] });
+    }
+  }
+
+  private async sendMobileInfo(canvasName: string, editorWs: WebSocket): Promise<void> {
+    const url = this.getMobileUrl(canvasName);
+    if (!url) return;
+    try {
+      const qrDataUrl = await QRCode.toDataURL(url, { width: 256, margin: 2 });
+      this.send(editorWs, { type: "mobile_info", url, qr_data_url: qrDataUrl });
+    } catch {
+      // QR generation failed, skip
+    }
+  }
+
   // --- Canvas operations ---
 
   openCanvas(name: string): { url: string; isNew: boolean } {
@@ -139,7 +317,7 @@ export class CanvasManager {
       this.sessions.set(name, {
         name,
         svg: DEFAULT_SVG,
-        ws: null,
+        clients: new Set(),
         createdAt: Date.now(),
       });
     }
@@ -175,9 +353,7 @@ export class CanvasManager {
     const session = this.sessions.get(name);
     if (!session) return false;
     session.svg = svg;
-    if (session.ws) {
-      this.send(session.ws, { type: "set_svg", svg });
-    }
+    this.broadcast(session, { type: "set_svg", svg });
     return true;
   }
 
@@ -190,16 +366,14 @@ export class CanvasManager {
       /<\/svg>\s*$/,
       svgFragment + "\n</svg>"
     );
-    if (session.ws) {
-      this.send(session.ws, { type: "add_element", svg_fragment: svgFragment });
-    }
+    this.broadcast(session, { type: "add_element", svg_fragment: svgFragment });
     return true;
   }
 
   listCanvases(): Array<{ name: string; hasEditor: boolean; createdAt: number }> {
     return Array.from(this.sessions.values()).map((s) => ({
       name: s.name,
-      hasEditor: s.ws?.readyState === WebSocket.OPEN,
+      hasEditor: [...s.clients].some((c) => c.readyState === WebSocket.OPEN),
       createdAt: s.createdAt,
     }));
   }
@@ -208,27 +382,24 @@ export class CanvasManager {
     const session = this.sessions.get(name);
     if (!session) return false;
     session.svg = DEFAULT_SVG;
-    if (session.ws) {
-      this.send(session.ws, { type: "clear" });
-    }
+    session.json = undefined;
+    this.broadcast(session, { type: "clear" });
     return true;
   }
 
   focusCanvas(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "focus" });
-    }
+    this.broadcast(session, { type: "focus" });
     return true;
   }
 
   closeCanvas(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "close" });
-      session.ws.close();
+    this.broadcast(session, { type: "close" });
+    for (const client of session.clients) {
+      client.close();
     }
     this.sessions.delete(name);
     return true;
@@ -239,9 +410,7 @@ export class CanvasManager {
   addTextbox(name: string, options: TextboxOptions): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "add_textbox", options });
-    }
+    this.broadcast(session, { type: "add_textbox", options });
     return true;
   }
 
@@ -250,18 +419,14 @@ export class CanvasManager {
   lockObjects(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "lock_all" });
-    }
+    this.broadcast(session, { type: "lock_all" });
     return true;
   }
 
   unlockObjects(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "unlock_all" });
-    }
+    this.broadcast(session, { type: "unlock_all" });
     return true;
   }
 
@@ -270,35 +435,37 @@ export class CanvasManager {
   setZoom(name: string, value: number, cx?: number, cy?: number): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "set_zoom", value, cx, cy });
-    }
+    this.broadcast(session, { type: "set_zoom", value, cx, cy });
     return true;
   }
 
   panTo(name: string, x: number, y: number): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "pan_to", x, y });
-    }
+    this.broadcast(session, { type: "pan_to", x, y });
     return true;
   }
 
   zoomToFit(name: string): boolean {
     const session = this.sessions.get(name);
     if (!session) return false;
-    if (session.ws) {
-      this.send(session.ws, { type: "zoom_to_fit" });
-    }
+    this.broadcast(session, { type: "zoom_to_fit" });
     return true;
   }
 
   // --- Canvas JSON (for templates) ---
 
+  private getFirstOpenClient(session: CanvasSession): WebSocket | null {
+    for (const client of session.clients) {
+      if (client.readyState === WebSocket.OPEN) return client;
+    }
+    return null;
+  }
+
   requestCanvasJson(session: CanvasSession): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+      const client = this.getFirstOpenClient(session);
+      if (!client) {
         reject(new Error("No connected editor"));
         return;
       }
@@ -313,13 +480,14 @@ export class CanvasManager {
         resolve(json);
       });
 
-      this.send(session.ws, { type: "request_json", request_id: requestId });
+      this.send(client, { type: "request_json", request_id: requestId });
     });
   }
 
   requestCanvasScreenshot(session: CanvasSession): Promise<string> {
     return new Promise((resolve, reject) => {
-      if (!session.ws || session.ws.readyState !== WebSocket.OPEN) {
+      const client = this.getFirstOpenClient(session);
+      if (!client) {
         reject(new Error("No connected editor"));
         return;
       }
@@ -334,7 +502,7 @@ export class CanvasManager {
         resolve(dataUrl);
       });
 
-      this.send(session.ws, { type: "request_screenshot", request_id: requestId });
+      this.send(client, { type: "request_screenshot", request_id: requestId });
     });
   }
 
@@ -365,9 +533,8 @@ export class CanvasManager {
     if (!fs.existsSync(filePath)) return false;
 
     const json = fs.readFileSync(filePath, "utf-8");
-    if (session.ws) {
-      this.send(session.ws, { type: "load_json", json });
-    }
+    session.json = json;
+    this.broadcast(session, { type: "load_json", json });
     return true;
   }
 

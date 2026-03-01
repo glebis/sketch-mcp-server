@@ -16,5 +16,5 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/editor/**/*.ts"]
+  "exclude": ["src/editor/**/*.ts", "src/mobile/**/*.ts"]
 }

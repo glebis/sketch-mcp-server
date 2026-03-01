@@ -3,7 +3,8 @@ import type { WebSocket } from "ws";
 export interface CanvasSession {
   name: string;
   svg: string;
-  ws: WebSocket | null;
+  json?: string;
+  clients: Set<WebSocket>;
   createdAt: number;
 }
 
@@ -23,7 +24,20 @@ export type ServerMessage =
   | { type: "load_json"; json: string }
   | { type: "set_zoom"; value: number; cx?: number; cy?: number }
   | { type: "pan_to"; x: number; y: number }
-  | { type: "zoom_to_fit" };
+  | { type: "zoom_to_fit" }
+  | { type: "canvas_textboxes"; textboxes: TextboxInfo[] }
+  | { type: "canvas_dimensions"; width: number; height: number }
+  | { type: "update_textbox"; object_index: number; text: string }
+  | { type: "draw_points"; points: Array<{x: number; y: number}>; color: string; width: number; scale_factor: number }
+  | { type: "draw_complete"; path_data: string; color: string; width: number }
+  | { type: "add_image"; data_base64: string; x: number; y: number; width: number; height: number }
+  | { type: "mobile_info"; url: string; qr_data_url: string };
+
+export interface TextboxInfo {
+  index: number;
+  text: string;
+  label: string;
+}
 
 export interface TextboxOptions {
   x: number;
@@ -38,7 +52,12 @@ export interface TextboxOptions {
 // Browser -> Server messages
 export type ClientMessage =
   | { type: "canvas_update"; svg: string }
-  | { type: "ready"; canvas_name: string }
+  | { type: "canvas_json_update"; json: string }
+  | { type: "ready"; canvas_name: string; client_type?: "editor" | "mobile" }
   | { type: "pong" }
   | { type: "canvas_json"; request_id: string; json: string }
-  | { type: "canvas_screenshot"; request_id: string; data_url: string };
+  | { type: "canvas_screenshot"; request_id: string; data_url: string }
+  | { type: "update_textbox"; object_index: number; text: string }
+  | { type: "draw_points"; points: Array<{x: number; y: number}>; color: string; width: number; scale_factor: number }
+  | { type: "draw_complete"; path_data: string; color: string; width: number }
+  | { type: "photo_upload"; data_base64: string; width: number; height: number };

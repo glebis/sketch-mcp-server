@@ -14,6 +14,7 @@ interface ToolbarCallbacks {
   onStrokeWidthChange: (width: number) => void;
   onUndo: () => void;
   onRedo: () => void;
+  onFormToggle?: () => void;
 }
 
 const TOOL_ICONS: Record<ToolType, { label: string; svg: string }> = {
@@ -51,7 +52,13 @@ const TOOL_ICONS: Record<ToolType, { label: string; svg: string }> = {
   },
 };
 
-export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
+export interface ToolbarHandle {
+  state: ToolbarState;
+  setActiveTool: (tool: ToolType) => void;
+  formBtn: HTMLButtonElement;
+}
+
+export function initToolbar(callbacks: ToolbarCallbacks): ToolbarHandle {
   const toolbar = document.getElementById("toolbar")!;
   const state: ToolbarState = {
     tool: "select",
@@ -104,30 +111,78 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
   sep2.className = "separator";
   toolbar.appendChild(sep2);
 
-  // Fill color
+  // Fill color (with no-fill toggle)
+  let fillEnabled = true;
+  let lastFillColor = state.fillColor;
   const fillLabel = document.createElement("label");
   fillLabel.textContent = "Fill";
   const fillInput = document.createElement("input");
   fillInput.type = "color";
   fillInput.value = state.fillColor;
   fillInput.addEventListener("input", () => {
-    state.fillColor = fillInput.value;
-    callbacks.onFillChange(fillInput.value);
+    lastFillColor = fillInput.value;
+    if (fillEnabled) {
+      state.fillColor = fillInput.value;
+      callbacks.onFillChange(fillInput.value);
+    }
   });
   fillLabel.appendChild(fillInput);
+
+  const fillToggle = document.createElement("button");
+  fillToggle.className = "color-toggle active";
+  fillToggle.title = "Toggle fill (click to remove)";
+  fillToggle.textContent = "\u2715";
+  fillToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    fillEnabled = !fillEnabled;
+    fillToggle.classList.toggle("active", fillEnabled);
+    fillInput.disabled = !fillEnabled;
+    if (fillEnabled) {
+      state.fillColor = lastFillColor;
+      callbacks.onFillChange(lastFillColor);
+    } else {
+      state.fillColor = "transparent";
+      callbacks.onFillChange("transparent");
+    }
+  });
+  fillLabel.appendChild(fillToggle);
   toolbar.appendChild(fillLabel);
 
-  // Stroke color
+  // Stroke color (with no-stroke toggle)
+  let strokeEnabled = true;
+  let lastStrokeColor = state.strokeColor;
   const strokeLabel = document.createElement("label");
   strokeLabel.textContent = "Stroke";
   const strokeInput = document.createElement("input");
   strokeInput.type = "color";
   strokeInput.value = state.strokeColor;
   strokeInput.addEventListener("input", () => {
-    state.strokeColor = strokeInput.value;
-    callbacks.onStrokeChange(strokeInput.value);
+    lastStrokeColor = strokeInput.value;
+    if (strokeEnabled) {
+      state.strokeColor = strokeInput.value;
+      callbacks.onStrokeChange(strokeInput.value);
+    }
   });
   strokeLabel.appendChild(strokeInput);
+
+  const strokeToggle = document.createElement("button");
+  strokeToggle.className = "color-toggle active";
+  strokeToggle.title = "Toggle stroke (click to remove)";
+  strokeToggle.textContent = "\u2715";
+  strokeToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    strokeEnabled = !strokeEnabled;
+    strokeToggle.classList.toggle("active", strokeEnabled);
+    strokeInput.disabled = !strokeEnabled;
+    if (strokeEnabled) {
+      state.strokeColor = lastStrokeColor;
+      callbacks.onStrokeChange(lastStrokeColor);
+    } else {
+      state.strokeColor = "transparent";
+      callbacks.onStrokeChange("transparent");
+    }
+  });
+  strokeLabel.appendChild(strokeToggle);
   toolbar.appendChild(strokeLabel);
 
   // Stroke width
@@ -144,6 +199,18 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
   });
   widthLabel.appendChild(widthInput);
   toolbar.appendChild(widthLabel);
+
+  // Form panel toggle button
+  const sep3 = document.createElement("div");
+  sep3.className = "separator";
+  toolbar.appendChild(sep3);
+
+  const formBtn = document.createElement("button");
+  formBtn.title = "Template Fields (F)";
+  formBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="7" y1="8" x2="17" y2="8"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="13" y2="16"/></svg>`;
+  formBtn.style.display = "none";
+  formBtn.addEventListener("click", () => callbacks.onFormToggle?.());
+  toolbar.appendChild(formBtn);
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
@@ -174,5 +241,5 @@ export function initToolbar(callbacks: ToolbarCallbacks): ToolbarState {
   // Set initial active
   setActiveTool("select");
 
-  return state;
+  return { state, setActiveTool, formBtn };
 }
