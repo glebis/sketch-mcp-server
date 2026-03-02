@@ -366,6 +366,115 @@ describe("Photo upload", () => {
     expect(typeof imgMsg.x).toBe("number");
     expect(typeof imgMsg.y).toBe("number");
   });
+
+  it("should assign a unique photo_id to each add_image broadcast", async () => {
+    const port = cm.getPort();
+    cm.openCanvas(canvasName);
+
+    const editor = await connectWs(port);
+    wsClients.push(editor);
+    sendJson(editor, { type: "ready", canvas_name: canvasName, client_type: "editor" });
+    await delay(100);
+
+    const editorMsgs = collectMessages(editor);
+
+    const mobile = await connectWs(port);
+    wsClients.push(mobile);
+    sendJson(mobile, { type: "ready", canvas_name: canvasName, client_type: "mobile" });
+    await delay(100);
+
+    const fakeBase64 = "iVBORw0KGgoAAAANSUhEUg==";
+    // Send two photos
+    sendJson(mobile, { type: "photo_upload", data_base64: fakeBase64, width: 640, height: 480 });
+    await delay(200);
+    sendJson(mobile, { type: "photo_upload", data_base64: fakeBase64, width: 320, height: 240 });
+    await delay(300);
+
+    const imgMsgs = editorMsgs.filter((m) => m.type === "add_image") as any[];
+    expect(imgMsgs.length).toBe(2);
+
+    // Both should have a photo_id
+    expect(typeof imgMsgs[0].photo_id).toBe("string");
+    expect(typeof imgMsgs[1].photo_id).toBe("string");
+
+    // IDs should be unique
+    expect(imgMsgs[0].photo_id).not.toBe(imgMsgs[1].photo_id);
+  });
+
+  it("should echo photo_id back to mobile sender for tracking", async () => {
+    const port = cm.getPort();
+    cm.openCanvas(canvasName);
+
+    const editor = await connectWs(port);
+    wsClients.push(editor);
+    sendJson(editor, { type: "ready", canvas_name: canvasName, client_type: "editor" });
+    await delay(100);
+
+    const mobile = await connectWs(port);
+    wsClients.push(mobile);
+    const mobileMsgs = collectMessages(mobile);
+    sendJson(mobile, { type: "ready", canvas_name: canvasName, client_type: "mobile" });
+    await delay(100);
+
+    sendJson(mobile, { type: "photo_upload", data_base64: "abc123", width: 100, height: 100 });
+    await delay(300);
+
+    const ackMsg = mobileMsgs.find((m) => m.type === "photo_ack") as any;
+    expect(ackMsg).toBeDefined();
+    expect(typeof ackMsg.photo_id).toBe("string");
+    expect(ackMsg.photo_id.length).toBeGreaterThan(0);
+  });
+});
+
+describe("Photo delete", () => {
+  let cm: CanvasManager;
+  const wsClients: WebSocket[] = [];
+  const canvasName = "test-photo-delete";
+
+  beforeEach(async () => {
+    cm = new CanvasManager({ host: "127.0.0.1" });
+    await cm.start();
+  });
+
+  afterEach(async () => {
+    for (const ws of wsClients) {
+      if (ws.readyState === WebSocket.OPEN) ws.close();
+    }
+    wsClients.length = 0;
+    cm.closeCanvas(canvasName);
+  });
+
+  it("should forward photo_delete as remove_image to editor", async () => {
+    const port = cm.getPort();
+    cm.openCanvas(canvasName);
+
+    const editor = await connectWs(port);
+    wsClients.push(editor);
+    sendJson(editor, { type: "ready", canvas_name: canvasName, client_type: "editor" });
+    await delay(100);
+
+    const editorMsgs = collectMessages(editor);
+
+    const mobile = await connectWs(port);
+    wsClients.push(mobile);
+    sendJson(mobile, { type: "ready", canvas_name: canvasName, client_type: "mobile" });
+    await delay(100);
+
+    // First upload a photo to get an ID
+    sendJson(mobile, { type: "photo_upload", data_base64: "abc", width: 100, height: 100 });
+    await delay(300);
+
+    const addMsg = editorMsgs.find((m) => m.type === "add_image") as any;
+    const photoId = addMsg.photo_id;
+
+    // Now delete it
+    sendJson(mobile, { type: "photo_delete", photo_id: photoId });
+    await delay(300);
+
+    const removeMsg = editorMsgs.find((m) => m.type === "remove_image") as any;
+    expect(removeMsg).toBeDefined();
+    expect(removeMsg.photo_id).toBe(photoId);
+  });
 });
 
 describe("Multi-client WebSocket", () => {

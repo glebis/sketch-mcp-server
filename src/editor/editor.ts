@@ -1224,11 +1224,21 @@ function connectWebSocket() {
               top: msg.y,
             });
             fabricImg.scaleToWidth(msg.width);
+            if (msg.photo_id) (fabricImg as any)._photoId = msg.photo_id;
             canvas.add(fabricImg);
             canvas.requestRenderAll();
             saveState();
           };
           imgEl.src = `data:image/jpeg;base64,${msg.data_base64}`;
+          break;
+        }
+        case "remove_image": {
+          const target = canvas.getObjects().find((o: any) => o._photoId === msg.photo_id);
+          if (target) {
+            canvas.remove(target);
+            canvas.requestRenderAll();
+            saveState();
+          }
           break;
         }
         case "mobile_info":

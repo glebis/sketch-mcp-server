@@ -218,51 +218,58 @@ function renderTextFields(textboxes: TextboxInfo[]) {
   }
 }
 
-// --- Photo capture ---
+// --- Photo capture (multi-photo with preview grid) ---
 const photoInput = document.getElementById("photo-input") as HTMLInputElement;
 const galleryInput = document.getElementById("gallery-input") as HTMLInputElement;
-const photoPreview = document.getElementById("photo-preview")!;
+const photoGrid = document.getElementById("photo-grid")!;
+const photoEmptyState = document.querySelector(".photo-empty-state") as HTMLElement;
 
-function handlePhotoSelect(file: File) {
+interface PhotoEntry {
+  localId: string;       // local tracking before server ack
+  photoId: string | null; // server-assigned ID (null until ack)
+  thumbSrc: string;       // data URL for preview
+}
+
+const photos: PhotoEntry[] = [];
+// Map local upload IDs to pending entries (for matching photo_ack)
+const pendingUploads: Map<string, PhotoEntry> = new Map();
+let uploadCounter = 0;
+
+function processFile(file: File) {
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      // Resize to max 800px on longest side
       const MAX = 800;
       let w = img.width;
       let h = img.height;
       if (w > MAX || h > MAX) {
-        if (w > h) {
-          h = Math.round(h * (MAX / w));
-          w = MAX;
-        } else {
-          w = Math.round(w * (MAX / h));
-          h = MAX;
-        }
+        if (w > h) { h = Math.round(h * (MAX / w)); w = MAX; }
+        else { w = Math.round(w * (MAX / h)); h = MAX; }
       }
 
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d")!;
+      const cvs = document.createElement("canvas");
+      cvs.width = w;
+      cvs.height = h;
+      const ctx = cvs.getContext("2d")!;
       ctx.drawImage(img, 0, 0, w, h);
 
-      const dataBase64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+      const dataBase64 = cvs.toDataURL("image/jpeg", 0.8).split(",")[1];
+      const thumbSrc = `data:image/jpeg;base64,${dataBase64}`;
 
-      // Show preview
-      photoPreview.innerHTML = "";
-      const previewImg = document.createElement("img");
-      previewImg.src = `data:image/jpeg;base64,${dataBase64}`;
-      photoPreview.appendChild(previewImg);
+      const localId = `local_${++uploadCounter}`;
+      const entry: PhotoEntry = { localId, photoId: null, thumbSrc };
+      photos.push(entry);
+      pendingUploads.set(localId, entry);
+      renderPhotoGrid();
 
-      // Send to server
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: "photo_upload",
           data_base64: dataBase64,
           width: w,
           height: h,
+          _local_id: localId,
         }));
       }
     };
@@ -271,12 +278,148 @@ function handlePhotoSelect(file: File) {
   reader.readAsDataURL(file);
 }
 
+function handleFiles(files: FileList | null) {
+  if (!files) return;
+  for (let i = 0; i < files.length; i++) {
+    processFile(files[i]);
+  }
+}
+
+function handlePhotoAck(photoId: string) {
+  // Match ack to the oldest pending upload
+  for (const [localId, entry] of pendingUploads) {
+    if (entry.photoId === null) {
+      entry.photoId = photoId;
+      pendingUploads.delete(localId);
+      renderPhotoGrid();
+      return;
+    }
+  }
+}
+
+function deletePhoto(index: number) {
+  const entry = photos[index];
+  if (!entry) return;
+
+  // Tell server to remove from desktop canvas
+  if (entry.photoId && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "photo_delete", photo_id: entry.photoId }));
+  }
+
+  photos.splice(index, 1);
+  renderPhotoGrid();
+}
+
+// --- Drag-to-reorder state ---
+let dragIndex: number | null = null;
+
+function renderPhotoGrid() {
+  photoGrid.innerHTML = "";
+  photoEmptyState.style.display = photos.length === 0 ? "block" : "none";
+
+  for (let i = 0; i < photos.length; i++) {
+    const entry = photos[i];
+    const item = document.createElement("div");
+    item.className = "photo-item";
+    item.draggable = true;
+    item.dataset.index = String(i);
+
+    const img = document.createElement("img");
+    img.src = entry.thumbSrc;
+    img.alt = `Photo ${i + 1}`;
+    item.appendChild(img);
+
+    if (!entry.photoId) {
+      const spinner = document.createElement("div");
+      spinner.className = "photo-uploading";
+      item.appendChild(spinner);
+    }
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "photo-delete";
+    deleteBtn.setAttribute("aria-label", `Delete photo ${i + 1}`);
+    deleteBtn.textContent = "\u00d7";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deletePhoto(i);
+    });
+    item.appendChild(deleteBtn);
+
+    // Drag events
+    item.addEventListener("dragstart", (e) => {
+      dragIndex = i;
+      item.classList.add("dragging");
+      e.dataTransfer!.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", () => {
+      dragIndex = null;
+      item.classList.remove("dragging");
+    });
+    item.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "move";
+    });
+    item.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (dragIndex !== null && dragIndex !== i) {
+        const moved = photos.splice(dragIndex, 1)[0];
+        photos.splice(i, 0, moved);
+        renderPhotoGrid();
+      }
+    });
+
+    // Touch drag support
+    item.addEventListener("touchstart", (e) => {
+      dragIndex = i;
+      item.classList.add("dragging");
+      e.preventDefault();
+    }, { passive: false });
+
+    item.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const targetItem = el?.closest(".photo-item") as HTMLElement | null;
+      // Highlight drop target
+      photoGrid.querySelectorAll(".photo-item").forEach(
+        (pi) => pi.classList.remove("drag-over")
+      );
+      if (targetItem && targetItem !== item) {
+        targetItem.classList.add("drag-over");
+      }
+    }, { passive: false });
+
+    item.addEventListener("touchend", (e) => {
+      item.classList.remove("dragging");
+      const touch = e.changedTouches[0];
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      const targetItem = el?.closest(".photo-item") as HTMLElement | null;
+      photoGrid.querySelectorAll(".photo-item").forEach(
+        (pi) => pi.classList.remove("drag-over")
+      );
+      if (targetItem && dragIndex !== null) {
+        const targetIndex = Number(targetItem.dataset.index);
+        if (targetIndex !== dragIndex) {
+          const moved = photos.splice(dragIndex, 1)[0];
+          photos.splice(targetIndex, 0, moved);
+          renderPhotoGrid();
+        }
+      }
+      dragIndex = null;
+    });
+
+    photoGrid.appendChild(item);
+  }
+}
+
 photoInput.addEventListener("change", () => {
-  if (photoInput.files?.[0]) handlePhotoSelect(photoInput.files[0]);
+  handleFiles(photoInput.files);
+  photoInput.value = "";
 });
 
 galleryInput.addEventListener("change", () => {
-  if (galleryInput.files?.[0]) handlePhotoSelect(galleryInput.files[0]);
+  handleFiles(galleryInput.files);
+  galleryInput.value = "";
 });
 
 // --- WebSocket connection ---
@@ -306,6 +449,9 @@ function connectWebSocket() {
           desktopWidth = msg.width;
           desktopHeight = msg.height;
           resizeCanvas();
+          break;
+        case "photo_ack":
+          handlePhotoAck(msg.photo_id);
           break;
         case "set_svg":
           // Mobile doesn't render the full SVG, just stores dimensions

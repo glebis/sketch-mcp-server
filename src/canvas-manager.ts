@@ -239,13 +239,29 @@ export class CanvasManager {
       case "photo_upload": {
         for (const session of this.sessions.values()) {
           if (session.clients.has(ws)) {
+            const photoId = `photo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             this.broadcast(session, {
               type: "add_image",
+              photo_id: photoId,
               data_base64: msg.data_base64,
               x: 100,
               y: 100,
               width: msg.width,
               height: msg.height,
+            }, ws);
+            // Acknowledge to sender with the assigned ID
+            this.send(ws, { type: "photo_ack", photo_id: photoId });
+            break;
+          }
+        }
+        break;
+      }
+      case "photo_delete": {
+        for (const session of this.sessions.values()) {
+          if (session.clients.has(ws)) {
+            this.broadcast(session, {
+              type: "remove_image",
+              photo_id: msg.photo_id,
             }, ws);
             break;
           }

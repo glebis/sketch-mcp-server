@@ -18,11 +18,14 @@
     </div>
 
     <div id="photo-panel" class="panel hidden">
-      <label class="photo-btn" for="photo-input">Take Photo</label>
-      <input type="file" id="photo-input" accept="image/*" capture="environment">
-      <label class="photo-btn" for="gallery-input">Choose from Gallery</label>
-      <input type="file" id="gallery-input" accept="image/*">
-      <div id="photo-preview"></div>
+      <div class="photo-actions">
+        <label class="photo-btn" for="photo-input">Take Photo</label>
+        <input type="file" id="photo-input" accept="image/*" capture="environment" multiple>
+        <label class="photo-btn photo-btn-secondary" for="gallery-input">Gallery</label>
+        <input type="file" id="gallery-input" accept="image/*" multiple>
+      </div>
+      <div id="photo-grid"></div>
+      <div class="photo-empty-state">No photos uploaded yet</div>
     </div>
 
     <nav id="tab-bar">

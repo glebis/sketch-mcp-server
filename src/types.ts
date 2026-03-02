@@ -30,7 +30,9 @@ export type ServerMessage =
   | { type: "update_textbox"; object_index: number; text: string }
   | { type: "draw_points"; points: Array<{x: number; y: number}>; color: string; width: number; scale_factor: number }
   | { type: "draw_complete"; path_data: string; color: string; width: number }
-  | { type: "add_image"; data_base64: string; x: number; y: number; width: number; height: number }
+  | { type: "add_image"; photo_id: string; data_base64: string; x: number; y: number; width: number; height: number }
+  | { type: "remove_image"; photo_id: string }
+  | { type: "photo_ack"; photo_id: string }
   | { type: "mobile_info"; url: string; qr_data_url: string };
 
 export interface TextboxInfo {
@@ -60,4 +62,5 @@ export type ClientMessage =
   | { type: "update_textbox"; object_index: number; text: string }
   | { type: "draw_points"; points: Array<{x: number; y: number}>; color: string; width: number; scale_factor: number }
   | { type: "draw_complete"; path_data: string; color: string; width: number }
-  | { type: "photo_upload"; data_base64: string; width: number; height: number };
+  | { type: "photo_upload"; data_base64: string; width: number; height: number }
+  | { type: "photo_delete"; photo_id: string };

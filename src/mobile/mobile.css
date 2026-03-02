@@ -143,7 +143,6 @@ html, body {
 #photo-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   align-items: center;
 }
 
@@ -151,16 +150,24 @@ html, body {
   display: none;
 }
 
+.photo-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 16px;
+  width: 100%;
+}
+
 .photo-btn {
   display: block;
-  width: 100%;
-  max-width: 300px;
-  padding: 14px;
+  flex: 1;
+  max-width: 160px;
+  padding: 14px 12px;
   background: #4a9eff;
   color: #fff;
   border: none;
   border-radius: 8px;
-  font-size: 16px;
+  font-size: 15px;
   text-align: center;
   cursor: pointer;
 }
@@ -169,20 +176,106 @@ html, body {
   background: #357abd;
 }
 
+.photo-btn-secondary {
+  background: #3a3a3a;
+  border: 1px solid #555;
+}
+
+.photo-btn-secondary:active {
+  background: #4a9eff;
+}
+
 #photo-input,
 #gallery-input {
   display: none;
 }
 
-#photo-preview {
+/* Photo grid */
+#photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 0 16px 16px;
   width: 100%;
-  max-width: 300px;
 }
 
-#photo-preview img {
-  width: 100%;
+.photo-item {
+  position: relative;
+  aspect-ratio: 1;
   border-radius: 8px;
-  margin-top: 8px;
+  overflow: hidden;
+  background: #2a2a2a;
+  cursor: grab;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.photo-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-item.dragging {
+  opacity: 0.4;
+  transform: scale(0.95);
+}
+
+.photo-item.drag-over {
+  outline: 2px solid #4a9eff;
+  outline-offset: -2px;
+}
+
+.photo-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-delete:active {
+  background: #ff4444;
+}
+
+.photo-uploading {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-uploading::after {
+  content: "";
+  width: 20px;
+  height: 20px;
+  border: 2px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.photo-empty-state {
+  text-align: center;
+  color: #666;
+  padding: 40px 20px;
+  font-size: 14px;
 }
 
 /* Tab bar */
