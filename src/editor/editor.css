@@ -384,3 +384,44 @@ html, body {
 .form-field-group textarea::placeholder {
   color: #adb5bd;
 }
+
+/* --- Crop Mode --- */
+.crop-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+}
+
+.crop-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.crop-confirm {
+  background: #339af0;
+  color: #fff;
+}
+.crop-confirm:hover {
+  background: #228be6;
+}
+
+.crop-cancel {
+  background: #495057;
+  color: #fff;
+}
+.crop-cancel:hover {
+  background: #343a40;
+}

@@ -2,6 +2,7 @@ import { Canvas as FabricCanvas, Rect, Ellipse, Triangle, Line, Polygon, Group, 
 import type { ToolType } from "./toolbar.ts";
 import { initToolbar } from "./toolbar.ts";
 import { initClipboardHandler } from "./clipboard.ts";
+import { initCropHandler } from "./crop-handler.ts";
 
 // Expose FabricImage for clipboard handler
 (window as any).__fabric = { FabricImage };
@@ -1274,6 +1275,9 @@ function connectWebSocket() {
 
 // --- Clipboard ---
 initClipboardHandler(canvas, () => saveState());
+
+// --- Crop ---
+initCropHandler(canvas, () => saveState());
 
 // --- Canvas Name Display ---
 const nameEl = document.querySelector(".canvas-name");
